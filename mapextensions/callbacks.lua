@@ -8,6 +8,7 @@ local memory = require("mapextensions.memory")
 local game = require("mapextensions.game")
 local registry = require("mapextensions.registry").registry
 local handles = require("mapextensions.handles")
+local required = require('mapextensions.required')
 
 --- The interface from the low level game logic to the higher level
 local callbacks = {
@@ -44,7 +45,9 @@ local callbacks = {
     if memory.customSectionInfoObject.size <= 0 then
       log(DEBUG, "afterReadSav(): no custom section present")
       log(DEBUG, "running initialization callbacks:")
-      for extensionName, callbacks in pairs(registry) do
+      required.validateEmpty()
+      for _, extensionName in ipairs(required.names()) do
+        local callbacks = registry[extensionName]
         if callbacks.initialize ~= nil then
           callbacks:initialize()
         end
@@ -62,11 +65,14 @@ local callbacks = {
 
     local zipHandle = luamemzip:MemoryZip(data, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'r')
 
-    for extensionName, callbacks in pairs(registry) do
-      callbacks:deserialize(handles.createReadHandle(zipHandle, extensionName))
-    end
-    
+    local ok, reason = xpcall(function()
+      required.validate(zipHandle)
+      for _, extensionName in ipairs(required.names()) do
+        registry[extensionName]:deserialize(handles.createReadHandle(zipHandle, extensionName))
+      end
+    end, debug.traceback)
     zipHandle:close()
+    assert(ok, reason)
     
   end,
   
@@ -75,12 +81,16 @@ local callbacks = {
     
     local zipHandle = luamemzip:MemoryZip(nil, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'w')
 
-    for extensionName, callbacks in pairs(registry) do
-      callbacks:serialize(handles.createWriteHandle(zipHandle, extensionName))
-    end
-    
-    local data, length = zipHandle:serialize()
+    local data, length
+    local ok, reason = xpcall(function()
+      for _, extensionName in ipairs(required.names()) do
+        registry[extensionName]:serialize(handles.createWriteHandle(zipHandle, extensionName))
+      end
+      handles.createWriteHandle(zipHandle, 'framework'):put(required.path, required.manifest())
+      data, length = zipHandle:serialize()
+    end, debug.traceback)
     zipHandle:close()
+    assert(ok, reason)
 
     if data == nil or data == false then
       error("could not serialize zip")
