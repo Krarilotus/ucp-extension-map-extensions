@@ -38,6 +38,9 @@ function M.register(name, callbacks, options)
     assert(type(callbacks[method]) == 'function', 'Required state section needs ' .. method)
   end
   assert(callbacks.isRequired == nil or type(callbacks.isRequired) == 'function', 'Invalid required state predicate')
+  assert((callbacks.observeBoundary==nil and callbacks.boundaryIntegrity==nil)
+    or (type(callbacks.observeBoundary)=='function' and type(callbacks.boundaryIntegrity)=='function'),
+    'Boundary observation needs both callbacks')
   M.providers[name] = {format=options.format, fingerprint=options.fingerprint:lower()}
 end
 
@@ -135,6 +138,37 @@ function M.contracts()
   local result = {}
   for name, provider in pairs(M.providers) do
     if active(name) then result[name] = {format=provider.format, fingerprint=provider.fingerprint} end
+  end
+  return result
+end
+
+local boundary
+function M.observeBoundary()
+  -- Publish only a complete observation. Errors cannot expose a stale success.
+  boundary=nil
+  local observed={}
+  for _,name in ipairs(names()) do
+    if active(name) then
+      local callbacks,provider=registry[name],M.providers[name]
+      local value={format=provider.format,fingerprint=provider.fingerprint}
+      if callbacks.observeBoundary then
+        callbacks:observeBoundary()
+        value.capture=function() return callbacks:boundaryIntegrity() end
+      else value.digest=callbacks:integrity() end
+      observed[name]=value
+    end
+  end
+  boundary=observed
+end
+
+function M.boundaryIntegrity()
+  assert(boundary,'No complete required state boundary has been observed')
+  local result={}
+  for name,value in pairs(boundary) do
+    local digest=value.capture and value.capture() or value.digest
+    assert(type(digest)=='string' and #digest>0 and #digest<=256 and digest:match('^[%w_.-]+$'),
+      'Invalid observed state digest: '..name)
+    result[name]={format=value.format,fingerprint=value.fingerprint,digest=digest}
   end
   return result
 end

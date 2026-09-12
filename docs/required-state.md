@@ -44,6 +44,14 @@ for the recorder's existing extension ZIP. Contracts and integrity results are
 copies; callers must not alter provider state. No additional native save format,
 ZIP implementation or simulation scan is introduced.
 
+`observeRequiredStateBoundary()` retains the last complete recorder boundary;
+`requiredStateBoundaryIntegrity()` returns its digests even after live state has
+changed. A provider may supply paired `observeBoundary()` and
+`boundaryIntegrity()` callbacks to defer hashing: the first copies into bounded
+observation storage, the second hashes that copy. Providers without the pair
+have their ordinary digest retained eagerly. Observation errors invalidate the
+whole boundary. This storage never drives the simulation or replaces saved state.
+
 Native game loaders and Map Extensions 1.0.0 cannot enforce this new manifest.
 Loading required-state saves through those readers is unsupported. This API
 also does not perform a multiplayer lobby handshake; peer content admission is

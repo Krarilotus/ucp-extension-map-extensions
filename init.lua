@@ -48,6 +48,8 @@ end
 function api:captureRequiredSections() return required.capture() end
 function api:requiredStateIntegrity() return required.integrity() end
 function api:requiredStateContracts() return required.contracts() end
+function api:observeRequiredStateBoundary() return required.observeBoundary() end
+function api:requiredStateBoundaryIntegrity() return required.boundaryIntegrity() end
 
 function api:requiredStateVersion() return 1 end
 

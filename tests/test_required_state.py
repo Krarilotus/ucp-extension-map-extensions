@@ -57,6 +57,33 @@ def test_read_only_capture_sorted_manifest_and_contract_copies():
     ''')
 
 
+def test_final_boundary_preserves_observed_state_and_rejects_failed_capture():
+    runtime().execute('''
+      local value,observed,hashes=1,nil,0
+      callbacks.observeBoundary=function()observed=value end
+      callbacks.boundaryIntegrity=function()hashes=hashes+1;return 'state-'..observed end
+      register('a')
+      assert(not pcall(required.boundaryIntegrity))
+      required.observeBoundary();assert(hashes==0)
+      value=2
+      assert(required.boundaryIntegrity().a.digest=='state-1' and hashes==1)
+      registry.a.observeBoundary=function()error('failed')end
+      assert(not pcall(required.observeBoundary))
+      assert(not pcall(required.boundaryIntegrity))
+    ''')
+
+
+def test_legacy_integrity_callback_is_captured_eagerly_at_the_boundary():
+    runtime().execute('''
+      local value='one'
+      callbacks.integrity=function()return value end
+      register('a');required.observeBoundary();value='two'
+      assert(required.boundaryIntegrity().a.digest=='one')
+      callbacks.observeBoundary=function()end
+      assert(not pcall(register,'b'))
+    ''')
+
+
 def test_missing_changed_and_duplicate_providers_rejected_before_callbacks():
     runtime().execute('''
       register('a')
