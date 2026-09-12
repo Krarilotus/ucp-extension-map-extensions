@@ -5,8 +5,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def runtime():
-    lua = LuaRuntime(unpack_returned_tuples=True)
+def runtime(runtime_type=LuaRuntime):
+    lua = runtime_type(unpack_returned_tuples=True)
     lua.globals().root = ROOT.as_posix()
     lua.globals().parse_yaml = lambda text: lua.table_from(yaml.safe_load(text), recursive=True)
     lua.execute('''

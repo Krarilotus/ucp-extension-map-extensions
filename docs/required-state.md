@@ -41,7 +41,9 @@ Recorders use API version 1: `requiredStateVersion()`,
 `captureRequiredSections()`, `requiredStateContracts()` and
 `requiredStateIntegrity()`. Capture returns the manifest and provider entries
 for the recorder's existing extension ZIP. Contracts and integrity results are
-copies; callers must not alter provider state. No additional native save format,
+detached ordinary tables, declared in the module's proxy metadata so recorders
+can iterate and serialize them in Lua and LuaJIT. Editing a returned table does
+not change provider state or later snapshots. No additional native save format,
 ZIP implementation or simulation scan is introduced.
 
 `observeRequiredStateBoundary()` retains the last complete recorder boundary;

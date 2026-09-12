@@ -53,4 +53,15 @@ function api:requiredStateBoundaryIntegrity() return required.boundaryIntegrity(
 
 function api:requiredStateVersion() return 1 end
 
-return api
+return api, {
+  proxy = {
+    -- These methods return detached snapshots, which Recorder iterates and
+    -- serializes as ordinary Lua tables. No provider state is exposed.
+    ignored = {
+      'captureRequiredSections',
+      'requiredStateIntegrity',
+      'requiredStateContracts',
+      'requiredStateBoundaryIntegrity',
+    },
+  },
+}
