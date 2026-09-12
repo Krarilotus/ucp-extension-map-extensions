@@ -1,6 +1,7 @@
 local helpers = require('mapextensions.helpers')
 
 local originalMapSectionInfoArray = core.AOBScan("? ? ? ? 00 00 00 00 20 74 02 00 01 00 e9 03 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 09 04 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 ea 03 ? ? ? ? 00 00 00 00 40 e8 04 00 01 00 eb 03")
+local nativeSaveInterface
 
 local function enlargeMemoryAllocation(memorySize) 
     
@@ -30,10 +31,15 @@ local function updateCustomSectionInfoObject(ptr_copyOfMapSectionAddressArray, c
 end
 
 local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks)
+  assert(nativeSaveInterface == nil, 'Map Extensions save hooks are already installed')
     
   -- Hooks
   -- read map or sav
   local ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
+  -- Resolve both original entries before either prologue is wrapped. Native
+  -- consumers receive these same entries and therefore retain our callbacks.
+  local readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
+  local writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
 
   local originalReadSav
   originalReadSav = core.hookCode(function(this, ptrMapSectionAddressArray)
@@ -50,7 +56,7 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
 
     return result
 
-  end, core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20"), 2, CallingConvention.THISCALL, 5)
+  end, readWorld, 2, CallingConvention.THISCALL, 5)
 
   -- write map or sav
   local originalWriteSav
@@ -68,7 +74,7 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
 
     return result
 
-  end, core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20"), 2, CallingConvention.THISCALL, 5)
+  end, writeWorld, 2, CallingConvention.THISCALL, 5)
 
   -- -- on clear map sections before read map or sav
   -- core.detourCode(function(registers)
@@ -114,6 +120,23 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
 
     return registers 
   end, core.AOBScan("89 5E 24 89 54 24 20"), 7)
+
+  nativeSaveInterface = {
+    version = 1,
+    packager = ptr_FilePackagerObj,
+    sections = originalMapSectionInfoArray,
+    sectionCount = 122,
+    descriptorSize = helpers.MapSectionAddress.sizeof,
+    readWorld = readWorld,
+    writeWorld = writeWorld,
+  }
+end
+
+local function getNativeSaveInterface()
+  assert(nativeSaveInterface, 'Enable Map Extensions before requesting its native save interface')
+  local result = {}
+  for key, value in pairs(nativeSaveInterface) do result[key] = value end
+  return result
 end
 
 return {
@@ -121,4 +144,5 @@ return {
   createCustomSectionInfoArray = createCustomSectionInfoArray,
   updateCustomSectionInfoObject = updateCustomSectionInfoObject,
   registerReadWriteSavHooks = registerReadWriteSavHooks,
+  getNativeSaveInterface = getNativeSaveInterface,
 }

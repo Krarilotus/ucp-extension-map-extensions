@@ -53,6 +53,10 @@ function api:requiredStateBoundaryIntegrity() return required.boundaryIntegrity(
 
 function api:requiredStateVersion() return 1 end
 
+-- Module consumers call the owner's wrapped native entries, preserving custom
+-- and required sections. Available only after enable installed the save hooks.
+function api:getNativeSaveInterface() return game.getNativeSaveInterface() end
+
 return api, {
   proxy = {
     -- These methods return detached snapshots, which Recorder iterates and
