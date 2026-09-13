@@ -47,6 +47,7 @@ assert(hookCount==3)
 local installedScans=scans
 local native=game.getNativeSaveInterface()
 assert(native.version==1 and native.packager==0x40000000)
+assert(native.failureHandling==1)
 assert(native.sectionCount==122 and native.descriptorSize==16)
 assert(native.readWorld==resolved['83 EC 0C 53 56 8B F1 8B 46 20'])
 assert(native.writeWorld==resolved['83 EC 10 53 55 56 8B F1 8B 46 20'])
