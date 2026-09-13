@@ -1,6 +1,21 @@
 # UCP Extension: map-extensions
 UCP Extension that enables storing extra information in .map and .sav files
 
+Version 1.1.3 stops native save/load operations when a callback fails. It uses
+UCP's existing fatal logger so a rejected required-state restore cannot leave a
+running world with missing extension state. This covers section sizing,
+initialization, validation, restoration and serialization at the existing hooks;
+successful calls, scans and section formats are unchanged. The required-state API
+still raises catchable errors when called directly for Recorder preflight.
+The dialog gives the reason and restart instruction; the error log retains the
+full stack trace. This replaces the verbose dialog in the 1.1.2 test build.
+
+Version 1.1.4 supplies native file context to state callbacks. A new `.map` can
+contain a nonzero editor tick, so providers must use `context.kind` or
+`handle.loadKind` to distinguish map initialization from save restoration.
+The existing native reader supplies this context; no additional scan or hook is
+installed. Recorder shares its filename binding through the native save API.
+
 ## Idea
 A .map file has sections. How to read these sections and where to store the data is stored in the .exe file.
 Currently that array is 123 entries long (.msv files use all of those). It cannot be expanded.

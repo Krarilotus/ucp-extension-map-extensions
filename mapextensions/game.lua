@@ -3,6 +3,21 @@ local helpers = require('mapextensions.helpers')
 local originalMapSectionInfoArray = core.AOBScan("? ? ? ? 00 00 00 00 20 74 02 00 01 00 e9 03 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 09 04 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 ea 03 ? ? ? ? 00 00 00 00 40 e8 04 00 01 00 eb 03")
 local nativeSaveInterface
 
+-- Stock RPS catches Lua hook errors and returns to the native caller. A failed
+-- load may already have changed native sections, so it must not resume a world
+-- whose required extension state was rejected or only partly restored.
+local function nativeBoundary(operation, callback)
+  return function(first, second)
+    local ok, result = xpcall(function() return callback(first, second) end, debug.traceback)
+    if ok then return result end
+    log(WARNING, 'Map Extensions: native ' .. operation .. ' failed.\n' .. tostring(result))
+    local reason = tostring(result):match('^[^\r\n]*'):gsub('%[string "[^"]*"%]:%d+:%s*', '')
+    log(FATAL, 'Map Extensions: failed while ' .. operation .. '.\n' .. reason
+      .. '\nRestart the game. Details: ucp3-error-log.log.')
+    error(result, 0) -- Preserve failure if a test logger returns.
+  end
+end
+
 local function enlargeMemoryAllocation(memorySize) 
     
   local ptr_codeReadSavMallocSize = core.AOBScan("68 ? ? ? ? 89 44 24 14") + 1
@@ -40,27 +55,29 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
   -- consumers receive these same entries and therefore retain our callbacks.
   local readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
   local writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
+  local filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
 
   local originalReadSav
-  originalReadSav = core.hookCode(function(this, ptrMapSectionAddressArray)
+  originalReadSav = core.hookCode(nativeBoundary('loading state', function(this, ptrMapSectionAddressArray)
     if originalMapSectionInfoArray ~= ptrMapSectionAddressArray then error("argument is not what we expected") end
 
     log(3, "readSavHook: beforeReadSav()")
-    callbacks.beforeReadSav()
+    local context = readContext()
+    callbacks.beforeReadSav(context)
     
     log(3, "readSavHook: originalReadSav()")
     local result = originalReadSav(this, customMapSectionInfoArray)
 
     log(3, "readSavHook: afterReadSav()")
-    callbacks.afterReadSav()
+    callbacks.afterReadSav(context)
 
     return result
 
-  end, readWorld, 2, CallingConvention.THISCALL, 5)
+  end), readWorld, 2, CallingConvention.THISCALL, 5)
 
   -- write map or sav
   local originalWriteSav
-  originalWriteSav = core.hookCode(function(this, ptrMapSectionAddressArray)
+  originalWriteSav = core.hookCode(nativeBoundary('saving state', function(this, ptrMapSectionAddressArray)
     if originalMapSectionInfoArray ~= ptrMapSectionAddressArray then error("argument is not what we expected") end
 
     log(3, "writeSavHook: beforeWriteSav()")
@@ -74,7 +91,7 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
 
     return result
 
-  end, writeWorld, 2, CallingConvention.THISCALL, 5)
+  end), writeWorld, 2, CallingConvention.THISCALL, 5)
 
   -- -- on clear map sections before read map or sav
   -- core.detourCode(function(registers)
@@ -83,7 +100,7 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
   -- end, core.AOBScan("53 55 56 8B F1 57 33 FF 89 ? ? ? ? ? 89 ? ? ? ? ? 89 ? ? ? ? ? 89 ? ? ? ? ? E8 ? ? ? ?"), 5)
 
 
-  core.detourCode(function(registers) 
+  core.detourCode(nativeBoundary('reading the save directory', function(registers)
 
     local directoryDataAddress = ptr_FilePackagerObj + 36
 
@@ -119,10 +136,15 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     })
 
     return registers 
-  end, core.AOBScan("89 5E 24 89 54 24 20"), 7)
+  end), core.AOBScan("89 5E 24 89 54 24 20"), 7)
 
   nativeSaveInterface = {
     version = 1,
+    failureHandling = 1, -- Native callback errors stop through the framework fatal logger.
+    readContext = 1,
+    resources = filenameBinding.resources,
+    resourceFileName = filenameBinding.resourceFileName,
+    resourceFileNameBytes = filenameBinding.resourceFileNameBytes,
     packager = ptr_FilePackagerObj,
     sections = originalMapSectionInfoArray,
     sectionCount = 122,

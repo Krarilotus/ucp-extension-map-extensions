@@ -24,6 +24,7 @@ function WriteHandle.put(self, path , data ) end
 
 ---Handle to serialize data
 ---@class ReadHandle
+---@field loadKind 'map'|'save'|nil Native file context; absent for direct preflight validation
 local ReadHandle = {}
 
 ---Get data from the .sav file
@@ -45,7 +46,8 @@ local SerializationCallbacks = {}
 
 ---When called, the extension should set (or reset) the data to a default state
 ---@return void
-function SerializationCallbacks:initialize() end
+---@param context table|nil Native read context with kind='map' or kind='save'
+function SerializationCallbacks:initialize(context) end
 
 ---When called, the extension should use the handle to serialize all information
 ---@param handle WriteHandle the handle to serialize data

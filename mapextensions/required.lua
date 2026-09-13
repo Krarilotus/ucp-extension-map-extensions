@@ -57,7 +57,7 @@ function M.manifest()
   return 'version: 1\nproviders:\n' .. table.concat(lines)
 end
 
-function M.validate(zip)
+function M.validate(zip, context)
   local handle = handles.createReadHandle(zip, 'framework')
   local seen = {}
   if handle:exists(M.path) then
@@ -88,6 +88,7 @@ function M.validate(zip)
     if callbacks.validate then
       local section = handles.createReadHandle(zip, name)
       section.required = seen[name] == true
+      section.loadKind = context and context.kind
       callbacks:validate(section)
     end
   end
@@ -113,8 +114,9 @@ function M.capture()
   return entries
 end
 
-function M.validateEmpty()
-  local empty = {exists=function() return false end, get=function() error('No custom state in this save') end}
+function M.validateEmpty(context)
+  local empty = {loadKind=context and context.kind,
+    exists=function() return false end, get=function() error('No custom state in this save') end}
   for _, name in ipairs(names()) do
     if registry[name].validate then registry[name]:validate(empty) end
   end

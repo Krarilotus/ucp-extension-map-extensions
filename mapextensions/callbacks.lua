@@ -39,17 +39,17 @@ local callbacks = {
     game.updateCustomSectionInfoObject(memory.customMapSectionInfoArray, memory.customSectionInfoObject)
   end,
   
-  afterReadSav = function()
+  afterReadSav = function(context)
     log(VERBOSE, "after read sav")
 
     if memory.customSectionInfoObject.size <= 0 then
       log(DEBUG, "afterReadSav(): no custom section present")
       log(DEBUG, "running initialization callbacks:")
-      required.validateEmpty()
+      required.validateEmpty(context)
       for _, extensionName in ipairs(required.names()) do
         local callbacks = registry[extensionName]
         if callbacks.initialize ~= nil then
-          callbacks:initialize()
+          callbacks:initialize(context)
         end
       end
       return
@@ -66,9 +66,11 @@ local callbacks = {
     local zipHandle = luamemzip:MemoryZip(data, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'r')
 
     local ok, reason = xpcall(function()
-      required.validate(zipHandle)
+      required.validate(zipHandle, context)
       for _, extensionName in ipairs(required.names()) do
-        registry[extensionName]:deserialize(handles.createReadHandle(zipHandle, extensionName))
+        local handle = handles.createReadHandle(zipHandle, extensionName)
+        handle.loadKind = context and context.kind
+        registry[extensionName]:deserialize(handle)
       end
     end, debug.traceback)
     zipHandle:close()
