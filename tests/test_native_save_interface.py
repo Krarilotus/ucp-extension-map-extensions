@@ -35,6 +35,10 @@ hookCode=function(callback,address,count,convention,size)
  end
 end,detourCode=function(_,_,size) assert(size==7);hookCount=hookCount+1 end}
 CallingConvention={THISCALL=1}; log=function() end
+package.loaded['mapextensions.readcontext']={resolve=function()
+ return {resources=0x40000000,resourceFileName=0x30000000,
+ resourceFileNameBytes=string.rep('x',20)},function() return {kind='map'} end
+end}
 local game=require('mapextensions.game')
 assert(not pcall(game.getNativeSaveInterface))
 local calls={}
@@ -47,7 +51,8 @@ assert(hookCount==3)
 local installedScans=scans
 local native=game.getNativeSaveInterface()
 assert(native.version==1 and native.packager==0x40000000)
-assert(native.failureHandling==1)
+assert(native.failureHandling==1 and native.readContext==1)
+assert(native.resources==0x40000000 and native.resourceFileName==0x30000000)
 assert(native.sectionCount==122 and native.descriptorSize==16)
 assert(native.readWorld==resolved['83 EC 0C 53 56 8B F1 8B 46 20'])
 assert(native.writeWorld==resolved['83 EC 10 53 55 56 8B F1 8B 46 20'])

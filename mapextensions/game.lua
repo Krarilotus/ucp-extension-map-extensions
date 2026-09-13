@@ -55,19 +55,21 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
   -- consumers receive these same entries and therefore retain our callbacks.
   local readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
   local writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
+  local filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
 
   local originalReadSav
   originalReadSav = core.hookCode(nativeBoundary('loading state', function(this, ptrMapSectionAddressArray)
     if originalMapSectionInfoArray ~= ptrMapSectionAddressArray then error("argument is not what we expected") end
 
     log(3, "readSavHook: beforeReadSav()")
-    callbacks.beforeReadSav()
+    local context = readContext()
+    callbacks.beforeReadSav(context)
     
     log(3, "readSavHook: originalReadSav()")
     local result = originalReadSav(this, customMapSectionInfoArray)
 
     log(3, "readSavHook: afterReadSav()")
-    callbacks.afterReadSav()
+    callbacks.afterReadSav(context)
 
     return result
 
@@ -139,6 +141,10 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
   nativeSaveInterface = {
     version = 1,
     failureHandling = 1, -- Native callback errors stop through the framework fatal logger.
+    readContext = 1,
+    resources = filenameBinding.resources,
+    resourceFileName = filenameBinding.resourceFileName,
+    resourceFileNameBytes = filenameBinding.resourceFileNameBytes,
     packager = ptr_FilePackagerObj,
     sections = originalMapSectionInfoArray,
     sectionCount = 122,

@@ -39,7 +39,11 @@ def test_native_failure_uses_framework_fatal_path(runtime, stage):
         local label=name
         callbacks[label]=function() if stage==label then error('injected '..label) end end
       end
-      local game=require('mapextensions.game')
+      package.loaded['mapextensions.readcontext']={resolve=function()
+ return {resources=0x40000000,resourceFileName=0x30000000,
+ resourceFileNameBytes=string.rep('x',20)},function() return {kind='map'} end
+end}
+local game=require('mapextensions.game')
       game.registerReadWriteSavHooks(300000,1337,callbacks)
       local interface=game.getNativeSaveInterface()
       -- Stock RPS catches a Lua error and returns zero to native code. Only the

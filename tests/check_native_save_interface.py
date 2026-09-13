@@ -19,7 +19,7 @@ def check(reference, variant):
     pe=pefile.PE(data=raw)
     base=pe.OPTIONAL_HEADER.ImageBase
     image=bytearray(pe.get_memory_mapped_image())
-    lua=LuaRuntime(unpack_returned_tuples=True)
+    lua=LuaRuntime(unpack_returned_tuples=True, encoding='latin-1')
     scans,installed=[],[]
 
     def scan(pattern):
@@ -36,10 +36,15 @@ def check(reference, variant):
 
     g=lua.globals()
     g.root=root.as_posix();g.scan=scan;g.mark_hook=hook
-    g.read_int=lambda address:struct.unpack_from('<I',image,address-base)[0]
+    g.read_int=lambda address:struct.unpack_from('<i',image,address-base)[0]
+    g.read_byte=lambda address:image[address-base]
+    g.read_string=lambda address,n:bytes(image[address-base:address-base+n])
     lua.execute('''
 package.path=root..'/?.lua;'..package.path
-core={AOBScan=scan,readInteger=read_int,
+core={AOBScan=scan,readInteger=read_int,readByte=read_byte,readString=read_string,
+ exposeCode=function(_,count,convention)
+  assert(count==1 and convention==1); return function() error('No native execution in image check') end
+ end,
  hookCode=function(_,address,count,convention,size)
   assert(count==2 and convention==1 and size==5); mark_hook(address)
   return function() error('Native save is outside this image check') end
@@ -58,6 +63,9 @@ native=game.getNativeSaveInterface()
     assert len(scans)==5 and len(installed)==3
     assert n.readWorld in installed and n.writeWorld in installed
     assert n.version==1 and n.sectionCount==122 and n.descriptorSize==16
+    assert n.readContext==1 and len(n.resourceFileNameBytes)==20
+    assert (n.resources,n.resourceFileName)==({'SHC':(0x11bf130,0x46c300),
+        'Extreme':(0x1293c20,0x46c520)}[variant])
     descriptors=image[n.sections-base:n.sections-base+(n.sectionCount+1)*n.descriptorSize]
     assert descriptors[-16:]==bytes(16)
     entries=list(struct.iter_unpack('<IIIHH',descriptors[:-16]))
