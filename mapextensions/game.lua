@@ -10,7 +10,10 @@ local function nativeBoundary(operation, callback)
   return function(first, second)
     local ok, result = xpcall(function() return callback(first, second) end, debug.traceback)
     if ok then return result end
-    log(FATAL, 'Map Extensions: failed while ' .. operation .. '. Restart the game.\n' .. tostring(result))
+    log(WARNING, 'Map Extensions: native ' .. operation .. ' failed.\n' .. tostring(result))
+    local reason = tostring(result):match('^[^\r\n]*'):gsub('%[string "[^"]*"%]:%d+:%s*', '')
+    log(FATAL, 'Map Extensions: failed while ' .. operation .. '.\n' .. reason
+      .. '\nRestart the game. Details: ucp3-error-log.log.')
     error(result, 0) -- Preserve failure if a test logger returns.
   end
 end

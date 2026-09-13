@@ -16,8 +16,9 @@ def test_native_failure_uses_framework_fatal_path(runtime, stage):
     lua.globals().root, lua.globals().stage = ROOT.as_posix(), stage
     lua.execute('''
       package.path=root..'/?.lua;'..package.path
-      FATAL=-3; fatalMessage=nil; nativeCalls=0
+      FATAL=-3; WARNING=-1; fatalMessage=nil; details=nil; nativeCalls=0
       log=function(level,message)
+        if level==WARNING then details=message end
         if level==FATAL then fatalMessage=message;error('PROCESS_STOPPED') end
       end
       local address=100000
@@ -53,6 +54,8 @@ def test_native_failure_uses_framework_fatal_path(runtime, stage):
       assert(fatalMessage and fatalMessage:find('Map Extensions',1,true),
         'Native callback failures must reach the framework fatal logger')
       assert(fatalMessage:find(stage=='wrongSections' and 'argument' or 'injected',1,true))
+      assert(not fatalMessage:find('stack traceback',1,true) and not fatalMessage:find('[string',1,true))
+      assert(details and details:find('stack traceback',1,true),'Keep full diagnostic detail in the log')
       local expected=(stage=='afterReadSav' or stage=='afterWriteSav') and 1 or 0
       assert(nativeCalls==expected,'No native operation may run after its admission callback fails')
     ''')
