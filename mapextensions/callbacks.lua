@@ -70,7 +70,11 @@ local callbacks = {
       for _, extensionName in ipairs(required.names()) do
         local handle = handles.createReadHandle(zipHandle, extensionName)
         handle.loadKind = context and context.kind
-        registry[extensionName]:deserialize(handle)
+        if required.initializesOnMap(extensionName, context) then
+          registry[extensionName]:initialize(context)
+        else
+          registry[extensionName]:deserialize(handle)
+        end
       end
     end, debug.traceback)
     zipHandle:close()

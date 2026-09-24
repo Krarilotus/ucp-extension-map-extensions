@@ -41,7 +41,15 @@ function M.register(name, callbacks, options)
   assert((callbacks.observeBoundary==nil and callbacks.boundaryIntegrity==nil)
     or (type(callbacks.observeBoundary)=='function' and type(callbacks.boundaryIntegrity)=='function'),
     'Boundary observation needs both callbacks')
-  M.providers[name] = {format=options.format, fingerprint=options.fingerprint:lower()}
+  assert(options.initializeOnMap == nil or type(options.initializeOnMap) == 'boolean',
+    'Invalid map initialization policy')
+  M.providers[name] = {format=options.format, fingerprint=options.fingerprint:lower(),
+    initializeOnMap=options.initializeOnMap == true}
+end
+
+function M.initializesOnMap(name, context)
+  return context and context.kind == 'map' and M.providers[name]
+    and M.providers[name].initializeOnMap == true
 end
 
 function M.manifest()
@@ -51,6 +59,7 @@ function M.manifest()
     if provider and active(name) then
       lines[#lines + 1] = '  - name: "' .. name .. '"\n    format: "' .. provider.format
         .. '"\n    fingerprint: "' .. provider.fingerprint .. '"\n'
+        .. (provider.initializeOnMap and '    initializeOnMap: true\n' or '')
     end
   end
   if #lines == 0 then return 'version: 1\nproviders: []\n' end
@@ -77,15 +86,21 @@ function M.validate(zip, context)
         'Invalid or duplicate required state provider')
       seen[provider.name] = true
       local current = M.providers[provider.name]
-      assert(current and registry[provider.name], 'This save requires state provider: ' .. provider.name)
-      assert(current.format == provider.format and current.fingerprint == provider.fingerprint,
-        'This save requires the original state provider content: ' .. provider.name)
+      assert(provider.initializeOnMap == nil or type(provider.initializeOnMap) == 'boolean',
+        'Invalid saved map initialization policy')
+      -- Renaming a save to .map intentionally makes a new editable scenario.
+      -- Only explicitly opted-in state can lose its saved-match requirements.
+      if not (context and context.kind == 'map' and provider.initializeOnMap == true) then
+        assert(current and registry[provider.name], 'This save requires state provider: ' .. provider.name)
+        assert(current.format == provider.format and current.fingerprint == provider.fingerprint,
+          'This save requires the original state provider content: ' .. provider.name)
+      end
     end
   end
   -- Every validator runs before the first extension restore callback.
   for _, name in ipairs(names()) do
     local callbacks = registry[name]
-    if callbacks.validate then
+    if callbacks.validate and not M.initializesOnMap(name, context) then
       local section = handles.createReadHandle(zip, name)
       section.required = seen[name] == true
       section.loadKind = context and context.kind
@@ -118,7 +133,9 @@ function M.validateEmpty(context)
   local empty = {loadKind=context and context.kind,
     exists=function() return false end, get=function() error('No custom state in this save') end}
   for _, name in ipairs(names()) do
-    if registry[name].validate then registry[name]:validate(empty) end
+    if registry[name].validate and not M.initializesOnMap(name, context) then
+      registry[name]:validate(empty)
+    end
   end
 end
 
