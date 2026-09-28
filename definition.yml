@@ -1,7 +1,8 @@
 type: module
 name: map-extensions
-version: 1.1.5
+version: 1.1.6
 author: gynt
 display-name: Map Extensions
 dependencies:
   framework: ^3.0.1
+tags: [maps, tools]
