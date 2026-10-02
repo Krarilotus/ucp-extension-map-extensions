@@ -16,6 +16,11 @@ contain a nonzero editor tick, so providers must use `context.kind` or
 The existing native reader supplies this context; no additional scan or hook is
 installed. Recorder shares its filename binding through the native save API.
 
+Version 1.1.6 keeps that dialog reason short in the game. The framework names
+module chunks `@<path>`, so each rethrown `assert` prefixed the reason with a
+`file.lua:line:` position that 1.1.3 did not remove. These are now removed as well;
+the error log still holds the full message and stack trace.
+
 ## Idea
 A .map file has sections. How to read these sections and where to store the data is stored in the .exe file.
 Currently that array is 123 entries long (.msv files use all of those). It cannot be expanded.
