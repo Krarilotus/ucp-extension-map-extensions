@@ -32,6 +32,7 @@ def test_required_state_results_through_framework_proxy(runtime_type):
       owner:registerSection('a',callbacks,
         {required=true,format='state-1',fingerprint=string.rep('a',64)})
       assert(owner:requiredStateVersion()==1)
+      assert(owner:requiredStateMapPolicyVersion()==1)
       local integrity=owner:requiredStateIntegrity()
       assert(next(integrity)=='a' and integrity.a.digest=='state-digest-1')
       integrity.a.digest='edited'

@@ -59,3 +59,20 @@ Loading required-state saves through those readers is unsupported. This API
 also does not perform a multiplayer lobby handshake; peer content admission is
 a separate responsibility. Source integration and acceptance status must be
 reported separately before a release.
+
+## Editable maps (1.1.5)
+
+`requiredStateMapPolicyVersion()` returns 1. A provider whose battle state should
+start fresh for maps can register `initializeOnMap=true` in its existing options.
+The manifest records this opt-in. When the native filename owner identifies a
+`.map` load (including a `.sav` renamed to `.map`), that saved provider no longer
+requires its original module content to open the scenario. If currently installed
+and opted in, its `initialize({kind='map'})` runs instead of validation/restore.
+Editor loads and new matches therefore do not reuse stale queue entries or unit
+references. Ordinary `.sav`, autosave and Recorder snapshot loads remain strict.
+
+Providers without the option retain their existing behavior. Other providers'
+requirements are not relaxed. This adds no filename scan, editor hook, alternate
+save format or changes to native world sections; it reuses the read context
+already supplied by 1.1.4. Lua owner/codec tests cover renamed maps and fresh-state
+round trips; actual in-game editor acceptance must still be recorded separately.
