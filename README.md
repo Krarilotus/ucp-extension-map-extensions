@@ -1,6 +1,10 @@
 # UCP Extension: map-extensions
 UCP Extension that enables storing extra information in .map and .sav files
 
+Modules can also mark game state that a save cannot do without, so a save is not
+loaded without it: see [docs/required-state.md](docs/required-state.md).
+Run the tests with `python -m pytest tests` (needs `pytest`, `lupa` and `pyyaml`).
+
 ## Idea
 A .map file has sections. How to read these sections and where to store the data is stored in the .exe file.
 Currently that array is 123 entries long (.msv files use all of those). It cannot be expanded.

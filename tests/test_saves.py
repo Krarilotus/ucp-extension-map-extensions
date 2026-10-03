@@ -33,7 +33,7 @@ function memoryZip(entries)
   return {
     open_entry = function(_, name)
       assert(current == nil, 'an entry is still open')
-      if entries[name] == nil then return false end
+      if entries[name] == nil and not entries.writable then return false end
       current = name; return true
     end,
     read_entry = function() return entries[current], #entries[current] end,
@@ -56,7 +56,7 @@ def test_saving_more_than_a_megabyte(runtime):
     lua.globals().root = ROOT.as_posix()
     lua.execute(HOST)
     lua.execute('''
-      saved = {}
+      saved = {writable = true}
       -- 1.5 MB with every byte value; a single string.byte call fails at about 1 MB.
       local parts = {}
       for i = 0, 1500000 - 1, 256 do
