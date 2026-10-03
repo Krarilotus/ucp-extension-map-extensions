@@ -127,7 +127,10 @@ def test_successful_load_and_save_pass_the_file_kind(runtime):
       assert(table.concat(seen,',')=='save,save' and nativeCalls==2 and #messages==0)
       local features=game.getNativeSaveInterface()
       assert(features.version==1 and features.failureHandling==1 and features.readContext==1)
-      assert(features.readWorld==nil,'no native addresses in this version')
+      -- Recorder gets the same addresses the hooks use: no scans of its own.
+      assert(features.sections==sections and features.readWorld==100200 and features.writeWorld==100300)
+      assert(features.packager==200000 and features.sectionCount==122 and features.descriptorSize==16)
+      features.sections=1; assert(game.getNativeSaveInterface().sections==sections,'a copy each time')
     ''')
 
 

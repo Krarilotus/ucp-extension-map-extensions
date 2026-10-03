@@ -17,14 +17,16 @@ def runtime(runtime_type=LuaRuntime):
       registry={}
       package.loaded['mapextensions.registry']={registry=registry}
       required=require('mapextensions.required')
-      writes,validates=0,0
+      writes,validates,captures=0,0,0
       callbacks={initialize=function()writes=writes+1 end,
         serialize=function(_,handle)handle:put('state.bin','saved') end,
         deserialize=function()writes=writes+1 end,
         validate=function(_,handle)
           validates=validates+1
           assert(handle:exists('state.bin') and handle:get('state.bin')=='saved')
-        end}
+        end,
+        capture=function(_,handle)captures=captures+1;handle:put('state.bin','saved') end,
+        integrity=function()return 'state-digest-1' end}
       function register(name)
         required.register(name,callbacks,{required=true,format='state-1',fingerprint=string.rep('a',64)})
         registry[name]=callbacks
@@ -87,6 +89,12 @@ def test_missing_data_is_still_checked_and_names_are_limited():
       end
       assert(not pcall(required.register,'b',{serialize=callbacks.serialize},
         {required=true,format='x',fingerprint=string.rep('a',64)}))
+      registry.a.capture=function(_,handle)handle:put('../escape','x') end
+      assert(not pcall(required.capture))
+      registry.a.capture=function(_,handle)handle:put('same','x');handle:put('same','x') end
+      assert(not pcall(required.capture))
+      registry.a.integrity=function()return string.rep('x',257) end
+      assert(not pcall(required.integrity))
     ''')
 
 
@@ -95,6 +103,8 @@ def test_a_module_with_nothing_to_keep_is_not_required():
       register('a')
       local saved=archive()
       registry.a.isRequired=function()return false end
+      assert(next(required.contracts())==nil and next(required.integrity())==nil)
+      assert(required.capture()['a/state.bin']==nil)
       assert(required.manifest()=='version: 1\\nproviders: []\\n')
       required.validate(zip(saved)) -- A save that did require it still validates.
       required.providers.a.fingerprint=string.rep('b',64)
@@ -108,4 +118,45 @@ def test_plain_sections_keep_working():
       registry.plain=callbacks
       assert(required.manifest()=='version: 1\\nproviders: []\\n')
       assert(required.providers.plain==nil)
+    ''')
+
+
+# For Recorder: copies and digests of the required sections, as in the fork's 1.1.x.
+def test_recorder_capture_is_read_only_and_returns_copies():
+    runtime().execute('''
+      register('z');register('a')
+      local entries=required.capture()
+      assert(entries['a/state.bin']=='saved' and entries['z/state.bin']=='saved')
+      assert(entries['framework/required-state.yml']==required.manifest())
+      assert(captures==2 and writes==0)
+      local contracts=required.contracts();contracts.a.format='changed'
+      assert(required.contracts().a.format=='state-1')
+      assert(required.integrity().a.digest=='state-digest-1')
+    ''')
+
+
+def test_recorder_boundary_keeps_what_was_observed():
+    runtime().execute('''
+      local value,observed,hashes=1,nil,0
+      callbacks.observeBoundary=function()observed=value end
+      callbacks.boundaryIntegrity=function()hashes=hashes+1;return 'state-'..observed end
+      register('a')
+      assert(not pcall(required.boundaryIntegrity))
+      required.observeBoundary();assert(hashes==0)
+      value=2
+      assert(required.boundaryIntegrity().a.digest=='state-1' and hashes==1)
+      registry.a.observeBoundary=function()error('failed')end
+      assert(not pcall(required.observeBoundary))
+      assert(not pcall(required.boundaryIntegrity))
+    ''')
+
+
+def test_recorder_boundary_without_paired_callbacks():
+    runtime().execute('''
+      local value='one'
+      callbacks.integrity=function()return value end
+      register('a');required.observeBoundary();value='two'
+      assert(required.boundaryIntegrity().a.digest=='one')
+      callbacks.observeBoundary=function()end
+      assert(not pcall(register,'b'))
     ''')

@@ -70,11 +70,15 @@ binding=require('mapextensions.readcontext').resolve(scan('83 EC 0C 53 56 8B F1 
     assert patched == [read_world + 0x0D, write_world + 0x14]
     f = g.features
     assert (f.version, f.failureHandling, f.readContext) == (1, 1, 1)
+    assert (f.readWorld, f.writeWorld, f.sectionCount, f.descriptorSize) == (read_world, write_world, 122, 16)
+    packager = scans['B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ']
+    assert f.packager == struct.unpack_from('<i', image, packager + 1 - base)[0]
     sections = scans[next(p for p in scans if p.startswith('? ? ? ? 00 00 00 00 20 74'))]
     descriptors = image[sections - base:sections - base + 123 * 16]
     assert descriptors[-16:] == bytes(16)
     entries = list(struct.iter_unpack('<IIIHH', descriptors[:-16]))
     assert all(address and size and skip == 0 for address, skip, size, _, _ in entries)
+    assert f.sections == sections
     return {'file': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
             'uniqueScans': len(scans), 'hooks': len(hooks), 'nativeSections': len(entries),
             'readWorld': hex(read_world), 'writeWorld': hex(write_world),

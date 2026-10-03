@@ -60,11 +60,32 @@ instead, so the new scenario starts without the old battle's state. The saved li
 records this, so the map also opens when that module is not installed. Other
 sections keep their rules.
 
+A required section also needs `capture(handle)` and `integrity()` for Recorder
+(below). `capture` puts the same data as `serialize` but must not change anything;
+`integrity` returns a short digest of the module's state.
+
 ## Feature checks
 
 `requiredStateVersion()` and `requiredStateMapPolicyVersion()` return 1.
-`getNativeSaveInterface()` returns `{version=1, failureHandling=1, readContext=1}`
-after Map Extensions is enabled.
+`getNativeSaveInterface()` returns `version=1`, `failureHandling=1` and
+`readContext=1` after Map Extensions is enabled, plus the addresses below.
+
+## For Recorder
+
+Recorder takes snapshots and compares a replay with its recording without saving
+the game. It uses:
+
+- `captureRequiredSections()`: copies of the list and of every required section;
+- `requiredStateIntegrity()` and `requiredStateContracts()`: each module's digest,
+  `format` and `fingerprint`;
+- `observeRequiredStateBoundary()` and `requiredStateBoundaryIntegrity()`: the
+  digests at one moment, kept until asked for. A module may supply
+  `observeBoundary()` and `boundaryIntegrity()` to copy first and hash later;
+- from `getNativeSaveInterface()`: the section table, the file packager and the two
+  save functions. These are the functions with Map Extensions' hooks; calling them
+  runs its callbacks. Never call the unhooked originals.
+
+All of these return copies: changing them changes nothing in the modules.
 
 ## Not covered
 

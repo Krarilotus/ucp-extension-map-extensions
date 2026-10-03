@@ -39,5 +39,28 @@ def test_api_through_framework_proxy(runtime_type):
       local features=owner:getNativeSaveInterface()
       assert(features.failureHandling==1 and features.readContext==1)
       assert(not pcall(owner.registerSection,owner,'a',callbacks))
+      -- For Recorder: plain copies through the proxy; editing them changes nothing.
+      local integrity=owner:requiredStateIntegrity()
+      assert(next(integrity)=='a' and integrity.a.digest=='state-digest-1')
+      integrity.a.digest='edited'
+      assert(owner:requiredStateIntegrity().a.digest=='state-digest-1')
+      local contracts=owner:requiredStateContracts()
+      contracts.a.format='edited'
+      assert(owner:requiredStateContracts().a.format=='state-1')
+      local captured=owner:captureRequiredSections()
+      local count=0
+      for name,data in pairs(captured) do
+        assert(type(name)=='string' and type(data)=='string');count=count+1
+      end
+      assert(count==2 and captured['a/state.bin']=='saved')
+      captured['a/state.bin']='edited'
+      assert(owner:captureRequiredSections()['a/state.bin']=='saved')
+      owner:observeRequiredStateBoundary()
+      local boundary=owner:requiredStateBoundaryIntegrity()
+      boundary.a.digest='edited'
+      assert(owner:requiredStateBoundaryIntegrity().a.digest=='state-digest-1')
       assert(writes==0)
+      registry.a.isRequired=function()return false end
+      assert(next(owner:requiredStateIntegrity())==nil)
+      assert(next(owner:requiredStateContracts())==nil)
     ''')

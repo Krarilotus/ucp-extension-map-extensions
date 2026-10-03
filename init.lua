@@ -49,10 +49,28 @@ end
 function api:requiredStateVersion() return 1 end
 function api:requiredStateMapPolicyVersion() return 1 end
 
----Which save features this version has: {version=1, failureHandling=1, readContext=1}.
----Available after enable(). Native addresses for other modules are not part of it yet.
+---Save features and the game's save functions, after enable(): version, failureHandling,
+---readContext, and for Recorder the section table, the file packager and the two wrapped
+---save functions (call those, never the unwrapped originals).
 function api:getNativeSaveInterface() return game.getNativeSaveInterface() end
 
+-- For Recorder: copies and digests of the required sections, without saving the game.
+-- They return detached tables; editing them changes nothing in the modules.
+function api:captureRequiredSections() return required.capture() end
+function api:requiredStateIntegrity() return required.integrity() end
+function api:requiredStateContracts() return required.contracts() end
+function api:observeRequiredStateBoundary() return required.observeBoundary() end
+function api:requiredStateBoundaryIntegrity() return required.boundaryIntegrity() end
+
 -- The framework's module proxy needs an 'ignored' list as soon as a method returns a
--- table; without one, getNativeSaveInterface() fails when called through modules[...].
-return api, {proxy = {ignored = {}}}
+-- table. The listed methods return plain copies, which Recorder iterates directly.
+return api, {
+  proxy = {
+    ignored = {
+      'captureRequiredSections',
+      'requiredStateIntegrity',
+      'requiredStateContracts',
+      'requiredStateBoundaryIntegrity',
+    },
+  },
+}

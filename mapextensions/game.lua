@@ -6,7 +6,7 @@ local originalMapSectionInfoArray = core.AOBScan("? ? ? ? 00 00 00 00 20 74 02 0
 local readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
 local writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
 
-local installed = false
+local nativeSaveInterface
 
 local function expect(address, pattern, what)
   local offset = 0
@@ -80,13 +80,13 @@ local function refuseSaving(result)
 end
 
 local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks)
-  assert(not installed, 'Map Extensions save hooks are already installed')
+  assert(nativeSaveInterface == nil, 'Map Extensions save hooks are already installed')
 
   -- Hooks
   -- read map or sav
   local ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
   -- Which file is being read: modules start fresh on a .map and restore on a .sav.
-  local _, readContext = require('mapextensions.readcontext').resolve(readWorld)
+  local filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
 
   local originalReadSav
   originalReadSav = core.hookCode(function(this, ptrMapSectionAddressArray)
@@ -179,17 +179,29 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     return registers
   end, core.AOBScan("89 5E 24 89 54 24 20"), 7)
 
-  installed = true
-end
-
--- What this version offers to modules that check for it.
-local function getNativeSaveInterface()
-  assert(installed, 'Enable Map Extensions before asking for its save features')
-  return {
+  nativeSaveInterface = {
     version = 1,
     failureHandling = 1, -- a rejected load stops the game; a failed save is not written
     readContext = 1,     -- callbacks learn whether a .map or a .sav is being loaded
+    -- For Recorder: the same addresses these hooks use, so it needs no scans of its own.
+    resources = filenameBinding.resources,
+    resourceFileName = filenameBinding.resourceFileName,
+    resourceFileNameBytes = filenameBinding.resourceFileNameBytes,
+    packager = ptr_FilePackagerObj,
+    sections = originalMapSectionInfoArray,
+    sectionCount = 122,
+    descriptorSize = helpers.MapSectionAddress.sizeof,
+    readWorld = readWorld,   -- wrapped: calling it runs Map Extensions' load callbacks
+    writeWorld = writeWorld, -- wrapped: calling it runs Map Extensions' save callbacks
   }
+end
+
+-- A fresh copy each time, so callers cannot change Map Extensions' own table.
+local function getNativeSaveInterface()
+  assert(nativeSaveInterface, 'Enable Map Extensions before asking for its save interface')
+  local result = {}
+  for key, value in pairs(nativeSaveInterface) do result[key] = value end
+  return result
 end
 
 return {
