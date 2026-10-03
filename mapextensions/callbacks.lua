@@ -9,6 +9,20 @@ local game = require("mapextensions.game")
 local registry = require("mapextensions.registry").registry
 local handles = require("mapextensions.handles")
 
+local WRITE_CHUNK = 4096
+
+--- Keep a copy of the custom section for debugging. A failure here must not stop
+--- the save or load itself.
+local function writeDebugCopy(path, data)
+  local f, err = io.open(path, 'wb')
+  if f == nil then
+    log(WARNING, string.format("could not write debug copy %s: %s", path, tostring(err)))
+    return
+  end
+  f:write(data)
+  f:close()
+end
+
 --- The interface from the low level game logic to the higher level
 local callbacks = {
 
@@ -55,10 +69,7 @@ local callbacks = {
     -- At this point, readSav has processed (decompressed) all sections, including the custom section
     local data = core.readString(memory.customSectionAddress, memory.customSectionInfoObject.size)
 
-    local f, err = io.open("ucp/.cache/sav-custom-section-on-read.zip", 'wb')
-    if f == nil then error(err) end
-    f:write(data)
-    f:close()
+    writeDebugCopy("ucp/.cache/sav-custom-section-on-read.zip", data)
 
     local zipHandle = luamemzip:MemoryZip(data, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'r')
 
@@ -94,12 +105,14 @@ local callbacks = {
     -- The size of the custom section is updated in memory to make the process quicker (not process 100MB)
     game.updateCustomSectionInfoObject(memory.customMapSectionInfoArray, memory.customSectionInfoObject)
 
-    core.writeBytes(memory.customSectionAddress, table.pack(string.byte(data, 1, length)))    
+    -- string.byte returns one value per byte, and Lua limits how many values one call
+    -- may return (about a million), so one call fails for larger data. Write in pieces.
+    for first = 1, length, WRITE_CHUNK do
+      local last = math.min(first + WRITE_CHUNK - 1, length)
+      core.writeBytes(memory.customSectionAddress + first - 1, {string.byte(data, first, last)})
+    end
 
-    local f, err = io.open("ucp/.cache/sav-custom-section-on-write.zip", 'wb')
-    if f == nil then error(err) end
-    f:write(data)
-    f:close()
+    writeDebugCopy("ucp/.cache/sav-custom-section-on-write.zip", data)
 
   end,
   
