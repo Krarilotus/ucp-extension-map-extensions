@@ -63,3 +63,39 @@ local game=require('mapextensions.game')
       local expected=(stage=='afterReadSav' or stage=='afterWriteSav') and 1 or 0
       assert(nativeCalls==expected,'No native operation may run after its admission callback fails')
     ''')
+
+
+@pytest.mark.parametrize('runtime', [Lua54, LuaJIT], ids=['lua54', 'luajit21'])
+def test_fatal_reason_omits_framework_chunk_positions(runtime):
+    lua = runtime(unpack_returned_tuples=True)
+    lua.globals().root = ROOT.as_posix()
+    lua.execute('''
+      package.path=root..'/?.lua;'..package.path
+      FATAL=-3; WARNING=-1
+      log=function(level,message)
+        if level==FATAL then fatalMessage=message;error('PROCESS_STOPPED') end
+      end
+      local hooks={}
+      core={AOBScan=function() return 100000 end,readInteger=function()return 200000 end,
+        hookCode=function(callback) hooks[#hooks+1]=callback;return function() return 1 end end,
+        detourCode=function() end}
+      CallingConvention={THISCALL=1}
+      package.loaded['mapextensions.readcontext']={resolve=function()
+        return {resources=0x40000000,resourceFileName=0x30000000,
+          resourceFileNameBytes=string.rep('x',20)},function() return {kind='save'} end
+      end}
+      -- The framework loads module files as '@<path>' chunks. A provider assert is
+      -- rethrown by the owner's callback assert, so both add a position prefix.
+      local provider=load("assert(false, 'Provider: short reason')",
+        '@ucp/modules/provider-1.0.0/state.lua')
+      local owner=load([[local provider=...
+        return {afterReadSav=function()
+          local ok,reason=xpcall(provider,debug.traceback);assert(ok,reason)
+        end}]], '@ucp/modules/map-extensions-1.1.6/mapextensions/callbacks.lua')(provider)
+      owner.beforeReadSav=function() end
+      require('mapextensions.game').registerReadWriteSavHooks(300000,1337,owner)
+      pcall(hooks[1],200000,100000)
+      local lines={}
+      for line in fatalMessage:gmatch('[^%c]+') do lines[#lines+1]=line end
+      assert(lines[2]=='Provider: short reason','Unexpected dialog reason: '..tostring(lines[2]))
+    ''')

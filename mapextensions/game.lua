@@ -3,6 +3,17 @@ local helpers = require('mapextensions.helpers')
 local originalMapSectionInfoArray = core.AOBScan("? ? ? ? 00 00 00 00 20 74 02 00 01 00 e9 03 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 09 04 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 ea 03 ? ? ? ? 00 00 00 00 40 e8 04 00 01 00 eb 03")
 local nativeSaveInterface
 
+-- Module chunks are named '@<path>' by the framework loader; tests use '[string]'.
+-- Remove their leading 'chunk:line:' positions, which assert adds per rethrow.
+local function shortReason(line)
+  line = line:gsub('%[string "[^"]*"%]:%d+:%s*', '')
+  repeat
+    local before = line
+    line = line:gsub('^[^%s]-%.lua:%d+:%s*', '')
+  until line == before
+  return line
+end
+
 -- Stock RPS catches Lua hook errors and returns to the native caller. A failed
 -- load may already have changed native sections, so it must not resume a world
 -- whose required extension state was rejected or only partly restored.
@@ -11,7 +22,7 @@ local function nativeBoundary(operation, callback)
     local ok, result = xpcall(function() return callback(first, second) end, debug.traceback)
     if ok then return result end
     log(WARNING, 'Map Extensions: native ' .. operation .. ' failed.\n' .. tostring(result))
-    local reason = tostring(result):match('^[^\r\n]*'):gsub('%[string "[^"]*"%]:%d+:%s*', '')
+    local reason = shortReason(tostring(result):match('^[^\r\n]*'))
     log(FATAL, 'Map Extensions: failed while ' .. operation .. '.\n' .. reason
       .. '\nRestart the game. Details: ucp3-error-log.log.')
     error(result, 0) -- Preserve failure if a test logger returns.
