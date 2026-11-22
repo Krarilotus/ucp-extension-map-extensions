@@ -6,3 +6,4 @@ files:
 - src: "mapextensions/*.lua"
   target: "mapextensions/"
 - src: "luamemzip/luamemzip/$(Configuration)/luamemzip.dll"
+- src: "locale"
