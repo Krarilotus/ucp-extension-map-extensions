@@ -19,6 +19,26 @@ local function validVersion(value)
   return type(value) == 'string' and #value <= 64 and value:match('^[%w.+-]+$')
 end
 
+local function savedVersion(handle, provider)
+  if provider.moduleVersion then return provider.moduleVersion end
+  -- Earlier manifests did not include a package version. Normal saves already
+  -- carried it in the framework load order.
+  if handle:exists('extensions.yml') then
+    local ok, version = pcall(function()
+      local raw = handle:get('extensions.yml')
+      if #raw > MAX_MANIFEST then return end
+      local loadOrder = yaml.parse(raw)
+      for _, extension in ipairs(loadOrder) do
+        if extension.extension == provider.name and validVersion(extension.version) then
+          return extension.version
+        end
+      end
+    end)
+    if ok and version then return version end
+  end
+  return provider.format
+end
+
 local function names()
   local result = {}
   for name in pairs(registry) do result[#result + 1] = name end
@@ -141,7 +161,7 @@ function M.admit(zip, context)
         if not (current and registry[provider.name] and current.format == provider.format
           and current.accepted[schema]) then
           error({kind = missingOwner, name = provider.name,
-            version = provider.moduleVersion or provider.format}, 0)
+            version = savedVersion(handle, provider)}, 0)
         end
       end
     end
