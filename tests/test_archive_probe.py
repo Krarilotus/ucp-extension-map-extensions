@@ -58,3 +58,40 @@ def test_probe_refuses_invalid_directory_bounds(tmp_path, raw):
     path = tmp_path / 'world.sav'
     path.write_bytes(raw)
     assert not probe(path)[0]
+
+
+def test_native_selected_save_uses_framework_read_only_file_operations():
+    lua = LuaRuntime()
+    lua.globals().root = ROOT.as_posix()
+    lua.execute(r'''
+      package.path = root..'/?.lua;'..package.path
+      local path = 'C:\\User Documents\\Stronghold Crusader\\Saves\\test.sav'
+      local position, closed = 0, false
+      io.open = function() error('regular Lua files do not accept this game path') end
+      io.openFileDescriptor = function(selected, flags, permissions)
+        assert(selected==path and flags==0x8000 and permissions==0)
+        return 5
+      end
+      io.ucrt = {
+        _read = function(fd, address, size)
+          assert(not closed and fd==5 and address==1200 and size==4)
+          position=position+size
+          return size
+        end,
+        _lseek = function(fd, offset, origin)
+          assert(not closed and fd==5)
+          position = (origin==2 and 20 or origin==0 and 0 or position) + offset
+          return position
+        end,
+        _close = function(fd) assert(fd==5 and not closed); closed=true; return 0 end,
+      }
+      core={exposeCode=function(fn,_,abi) assert(abi==0); return fn end,
+        readString=function(address,size) assert(address==1200 and size==4); return 'data' end}
+      modules={cffi={cffi=function()
+        return {new=function() return 1200 end, cast=function(_,value) return value end, tonumber=tonumber}
+      end}}
+      local file=require('mapextensions.archiveprobe').openGameSave(path)
+      assert(file:seek('end')==20 and file:seek('set',0)==0)
+      assert(file:read(4)=='data' and file:seek()==4)
+      assert(file:close() and closed)
+    ''')

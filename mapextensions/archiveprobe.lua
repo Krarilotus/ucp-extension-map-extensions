@@ -4,6 +4,36 @@
 local constants = require('mapextensions.constants')
 local M = {}
 local DIRECTORY_SIZE, LEGACY_DIRECTORY_SIZE = 3036, 2036
+local seekOrigins = {set = 0, cur = 1, ['end'] = 2}
+local fileOperations
+
+function M.openGameSave(path)
+  if not fileOperations then
+    fileOperations = {
+      read = core.exposeCode(io.ucrt._read, 3, 0),
+      seek = core.exposeCode(io.ucrt._lseek, 3, 0),
+      close = core.exposeCode(io.ucrt._close, 1, 0),
+    }
+  end
+  -- Use the framework's game-file opener. Native saves can live in Documents
+  -- or under the selected game data path, outside the ordinary Lua file root.
+  local fd = io.openFileDescriptor(path, 0x8000, 0) -- read only, binary
+  assert(type(fd) == 'number' and fd >= 0 and fd < 0x7fffffff, 'Could not open the selected save')
+  return {
+    read = function(_, size)
+      local ffi = modules.cffi:cffi()
+      local buffer = ffi.new('char[?]', size)
+      local address = ffi.tonumber(ffi.cast('unsigned long', buffer))
+      local count = fileOperations.read(fd, address, size)
+      if count == size then return core.readString(address, size) end
+    end,
+    seek = function(_, origin, offset)
+      local position = fileOperations.seek(fd, offset or 0, seekOrigins[origin or 'cur'])
+      if position >= 0 and position < 0x7fffffff then return position end
+    end,
+    close = function() return fileOperations.close(fd) == 0 end,
+  }
+end
 
 function M.read(file, decompress)
   local function take(size)
