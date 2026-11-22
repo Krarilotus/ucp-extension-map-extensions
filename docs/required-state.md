@@ -75,11 +75,13 @@ match continues.
 
 ## Loading
 
-1. On the usual Load action Map Extensions checks the list before calling the
-   native world reader. Each required provider must accept the format and saved
-   schema. The dialog names the missing or incompatible module and saved
-   version (the format identifier for older saves) and returns to the main
-   menu. A code fingerprint change alone does not reject a normal save.
+1. On the single-player Load action (solitary and skirmish games) Map Extensions
+   checks the list before calling the native world reader. Each required
+   provider must accept the format and saved schema. The dialog names the
+   missing or incompatible module and saved version (the format identifier for
+   older saves) and returns to the main menu. A file whose section cannot be
+   read is refused the same way with a general message. A code fingerprint
+   change alone does not reject a normal save.
 2. Every module's `validate(handle)` runs. It should check its data and raise an error
    if the data is missing or cannot be used. `handle.loadKind` is `'map'` or `'save'`;
    `handle.required` tells whether the saved list named this module.
@@ -87,9 +89,11 @@ match continues.
    migrate older accepted data before applying it.
 3. Only when all checks pass are the sections restored, in alphabetical order.
 
-Unexpected native read failures and module exceptions after native loading still
-take the existing fatal path. Other native reader callers use their own world
-transition and cannot use the standard Load action's refusal return.
+Everything else keeps the existing fatal path: multiplayer loads (they run inside
+a synchrony command, so one player returning to the menu would leave the others
+loading), the editor, campaign and map starts, which use other reader callers,
+and any failure after the world reader has started, including a module's own
+`validate(handle)` rejecting its data.
 
 Callbacks receive `{kind='map'}` or `{kind='save'}`: `initialize(context)`, and
 `loadKind` on the handles. A file is a map when its name ends in `.map`. Do not use

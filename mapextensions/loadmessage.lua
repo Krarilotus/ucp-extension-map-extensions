@@ -1,4 +1,5 @@
--- Draft translations need review by native speakers.
+-- Draft translations need review by native speakers. The `unreadable` texts
+-- are machine translations (Claude Opus 5.5) pending that review.
 local messages = {
   english = 'This save requires the module "%s" (%s). Enable the compatible version and try again.',
   german = 'Dieser Spielstand benötigt das Modul „%s“ (%s). Aktiviere eine kompatible Version und versuche es erneut.',
@@ -9,6 +10,18 @@ local messages = {
   chinese = '此存档需要“%s”模块（%s）。请启用兼容版本后重试。',
   spanish = 'Esta partida guardada requiere el módulo «%s» (%s). Activa una versión compatible y vuelve a intentarlo.',
   persian = 'این ذخیره به ماژول «%s» (%s) نیاز دارد. نسخهٔ سازگار را فعال کنید و دوباره تلاش کنید.',
+}
+
+local unreadable = {
+  english = 'This save could not be read. Its module data is damaged or unsupported.',
+  german = 'Dieser Spielstand konnte nicht gelesen werden. Seine Moduldaten sind beschädigt oder werden nicht unterstützt.',
+  french = 'Cette sauvegarde n’a pas pu être lue. Ses données de module sont endommagées ou non prises en charge.',
+  russian = 'Не удалось прочитать это сохранение. Данные модулей повреждены или не поддерживаются.',
+  hungarian = 'Ezt a mentést nem sikerült beolvasni. A moduladatai sérültek vagy nem támogatottak.',
+  turkish = 'Bu kayıt okunamadı. Modül verileri bozuk veya desteklenmiyor.',
+  chinese = '无法读取此存档。其模块数据已损坏或不受支持。',
+  spanish = 'No se pudo leer esta partida guardada. Sus datos de módulo están dañados o no son compatibles.',
+  persian = 'این ذخیره خوانده نشد. داده‌های ماژول آن آسیب دیده یا پشتیبانی نمی‌شود.',
 }
 
 local function language()
@@ -34,5 +47,9 @@ return function(name, version)
     local user = ffi.load('user32')
     show = function(text) user.MessageBoxW(nil, wide(text), wide('Map Extensions'), 0x00040030) end
   end
-  show((messages[language()] or messages.english):format(name, version))
+  if name then
+    show((messages[language()] or messages.english):format(name, version))
+  else
+    show(unreadable[language()] or unreadable.english)
+  end
 end

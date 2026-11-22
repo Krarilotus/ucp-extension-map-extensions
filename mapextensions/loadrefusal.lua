@@ -11,7 +11,19 @@ function M.resolve(readWorld, sections, packager)
     'Map Extensions: unexpected native Load call')
   local cleanup = core.AOBScan('5F 5E B9 ? ? ? ? E8 ? ? ? ? 5D 8B 8C 24 F4 03 00 00 5B 33 CC E8 ? ? ? ? 81 C4 F4 03 00 00 C3',
     call + 5, call + 0x300)
-  return call, cleanup
+  -- Earlier in the same Load case the game reads its game mode and takes the
+  -- single-player path for 0 (solitary) and 99 (skirmish); ebx is zero there.
+  -- Multiplayer loads run inside a synchrony command and must not be refused.
+  local mode = core.AOBScan('A1 ? ? ? ? 3B C3 0F 84 ? ? ? ? 83 F8 63 0F 84', call - 0x300, call)
+  assert(mode + 13 + core.readInteger(mode + 9) == mode + 22 + core.readInteger(mode + 18),
+    'Map Extensions: unexpected native Load game mode branch')
+  return call, cleanup, core.readInteger(mode + 1)
+end
+
+-- The same test as the native Load case: only these modes take its single-player path.
+function M.singlePlayer(gameMode)
+  local mode = core.readInteger(gameMode)
+  return mode == 0 or mode == 99
 end
 
 function M.install(call, cleanup, readWorld)
