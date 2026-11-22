@@ -139,6 +139,19 @@ def test_schema_migration_is_visible_to_the_owner_and_replay_hash_is_separate():
     ''')
 
 
+def test_legacy_save_reports_version_from_the_saved_load_order():
+    runtime().execute(r'''
+      register('a')
+      local entries=archive()
+      entries['framework/extensions.yml']='- extension: a\n  version: 1.7.3\n'
+      registry.a=nil
+      local ok, reason=pcall(required.admit,zip(entries))
+      assert(not ok and validates==0 and writes==0)
+      local name,version=required.missingOwner(reason)
+      assert(name=='a' and version=='1.7.3')
+    ''')
+
+
 # For Recorder: copies and digests of the required sections, as in the fork's 1.1.x.
 def test_recorder_capture_is_read_only_and_returns_copies():
     runtime().execute('''
