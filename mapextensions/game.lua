@@ -107,10 +107,11 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
       if originalMapSectionInfoArray ~= ptrMapSectionAddressArray then error("argument is not what we expected") end
       local context, path = readContext()
       if status and core.readInteger(status) == 1 then
-        local file = assert(io.open(path, 'rb'))
+        local file = probe.openGameSave(path)
         local readable, bytes = pcall(probe.read, file, decompress)
-        file:close()
+        local closed = file:close()
         assert(readable, bytes)
+        assert(closed, 'Could not close the selected save')
         callbacks.admit(bytes, context)
       end
 
