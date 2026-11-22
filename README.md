@@ -1,6 +1,21 @@
 # UCP Extension: map-extensions
 UCP Extension that enables storing extra information in .map and .sav files
 
+Version 1.2.0 keeps saves loadable. Sections are optional by default: a save
+made with a module that is now missing still loads, and that module's part plays
+like the unmodded game. A module whose missing data could break the match marks
+its section required; such a save is refused at the Load action before the world
+is read, a translated dialog names the module and version, and the game returns
+to the main menu. Map Extensions admits saves by their saved format and schema, not
+by a fingerprint of the module's files, so a module update or a settings change
+alone does not make it refuse a save; a module's own checks can be stricter. Recorder gets the complete save archive for its
+replay restore points. Modules declare `save-state` in their definition for the
+launcher. Loading a multiplayer save made with a different set of modules,
+versions or settings is not advised. See [docs/required-state.md](docs/required-state.md).
+
+The 1.1.x notes below describe test builds that were not published in the
+Store. 1.2.0 replaces their fatal dialog at the Load action with the refusal above.
+
 Version 1.1.3 stops native save/load operations when a callback fails. It uses
 UCP's existing fatal logger so a rejected required-state restore cannot leave a
 running world with missing extension state. This covers section sizing,
