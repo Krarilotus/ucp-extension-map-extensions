@@ -68,6 +68,37 @@ def test_multiplayer_loads_keep_the_fatal_path(runtime, mode):
     """)
 
 
+
+@RUNTIMES
+@pytest.mark.parametrize('mode', [0, 99])
+def test_other_reader_callers_are_not_refused_when_the_flag_is_not_set_by_the_load_action(runtime, mode):
+    # Skirmish and map starts and the siege editor read the world through the same
+    # function without the patched call, so the flag is 0 and they keep the fatal path.
+    lua = lua_host(runtime)
+    lua.globals().mode = mode
+    lua.execute(SETUP + """
+      status=0
+      rps(hooks[1],200000,sections)
+      assert(admitted==0 and nativeCalls==1 and menus==0 and #notices==0 and progress==0x493690)
+      assert(levels():find('-3',1,true), 'FATAL as before: '..levels())
+      assert(game.takeLoadRefusal()==nil)
+    """)
+
+
+@RUNTIMES
+def test_a_failure_after_the_world_reader_started_is_not_refused(runtime):
+    # Admission passed, the native read ran, then a module rejects its data: the
+    # world is half-read, so returning to the menu would be wrong.
+    lua = lua_host(runtime)
+    lua.globals().mode = 99
+    lua.execute(SETUP + """
+      missing=function() if nativeCalls>0 then error({name='battle',version='1.2.3'},0) end end
+      rps(hooks[1],200000,sections)
+      assert(admitted==1 and nativeCalls==1 and menus==0 and #notices==0 and status==1)
+      assert(levels():find('-3',1,true), 'FATAL as before: '..levels())
+      assert(game.takeLoadRefusal()==nil)
+    """)
+
 @RUNTIMES
 def test_an_unreadable_section_is_refused_with_the_generic_message(runtime):
     lua = lua_host(runtime)

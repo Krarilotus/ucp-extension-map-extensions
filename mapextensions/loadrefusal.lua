@@ -20,7 +20,9 @@ function M.resolve(readWorld, sections, packager)
   return call, cleanup, core.readInteger(mode + 1)
 end
 
--- The same test as the native Load case: only these modes take its single-player path.
+-- The same 0/99 test the native Load case uses for its single-player path. Its
+-- Custom Scenarios (.map) and siege views reach the patched call without testing
+-- the mode; they take the refusal under the same rule and are in the same state.
 function M.singlePlayer(gameMode)
   local mode = core.readInteger(gameMode)
   return mode == 0 or mode == 99
