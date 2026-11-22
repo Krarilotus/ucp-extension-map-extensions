@@ -15,7 +15,7 @@ def test_map_policy_missing_changed_provider_and_save_admission(runtime_type):
         registry[name]=callbacks
       end
       add('tunnelers',true)
-      local entries=required.capture()
+      local entries=archive()
       assert(entries['framework/required-state.yml']:find('initializeOnMap: true',1,true))
       -- Only .map opts out: saves, autosaves and replay .sav snapshots stay strict.
       required.validate(zip(entries),{kind='save'})
@@ -24,7 +24,7 @@ def test_map_policy_missing_changed_provider_and_save_admission(runtime_type):
       required.validate(zip(entries),{kind='map'})
       assert(validates==1)
       assert(not pcall(required.validate,zip(entries),{kind='save'}))
-      required.providers.tunnelers.fingerprint=string.rep('b',64)
+      required.providers.tunnelers.format='state-2'
       required.validate(zip(entries),{kind='map'})
       assert(not pcall(required.validate,zip(entries),{kind='save'}))
       registry.tunnelers=nil;required.providers.tunnelers=nil
@@ -32,7 +32,7 @@ def test_map_policy_missing_changed_provider_and_save_admission(runtime_type):
       assert(not pcall(required.validate,zip(entries),{kind='save'}))
       -- Existing providers keep their previous contract, including on .map.
       add('legacy',nil)
-      entries=required.capture();registry.legacy=nil;required.providers.legacy=nil
+      entries=archive();registry.legacy=nil;required.providers.legacy=nil
       assert(not pcall(required.validate,zip(entries),{kind='map'}))
       assert(not pcall(add,'invalid','yes'))
     ''')
@@ -55,7 +55,7 @@ def test_map_initializes_instead_of_restoring_and_editor_save_roundtrip(runtime_
       required.register('tunnelers',callbacks,{required=true,format='state-1',
         fingerprint=string.rep('a',64),initializeOnMap=true})
       registry.tunnelers=callbacks
-      local entries=required.capture()
+      local entries=archive()
       package.loaded['mapextensions.memory']={customSectionInfoObject={size=100}}
       package.loaded['mapextensions.game']={}
       package.loaded['luamemzip.dll']={MemoryZip=function()
@@ -67,9 +67,9 @@ def test_map_initializes_instead_of_restoring_and_editor_save_roundtrip(runtime_
       owner.afterReadSav({kind='save'});assert(world==99 and restored==1)
       owner.afterReadSav({kind='map'});assert(world==0 and initialized==1 and restored==1)
       -- Editing/re-saving a map carries fresh state; reopening still initializes.
-      entries=required.capture()
+      entries=archive()
       world=20;owner.afterReadSav({kind='map'});assert(world==0 and initialized==2)
       -- A new game's save keeps its newly accumulated state.
-      world=7;entries=required.capture();world=9
+      world=7;entries=archive();world=9
       owner.afterReadSav({kind='save'});assert(world==7 and restored==2)
     ''')

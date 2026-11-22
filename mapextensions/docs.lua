@@ -24,7 +24,8 @@ function WriteHandle.put(self, path , data ) end
 
 ---Handle to serialize data
 ---@class ReadHandle
----@field loadKind 'map'|'save'|nil Native file context; absent for direct preflight validation
+---@field loadKind 'map'|'save'|nil Which kind of file is being loaded
+---@field required boolean|nil For validate(): whether the save's list of required modules names this one
 local ReadHandle = {}
 
 ---Get data from the .sav file
@@ -46,7 +47,7 @@ local SerializationCallbacks = {}
 
 ---When called, the extension should set (or reset) the data to a default state
 ---@return void
----@param context table|nil Native read context with kind='map' or kind='save'
+---@param context table|nil {kind='map'} or {kind='save'}: the file being loaded
 function SerializationCallbacks:initialize(context) end
 
 ---When called, the extension should use the handle to serialize all information
@@ -58,3 +59,14 @@ function SerializationCallbacks:serialize(handle) end
 ---@param handle ReadHandle the handle to deserialize data
 ---@return void
 function SerializationCallbacks:deserialize(handle) end
+
+---Required sections only: check the saved data before anything is restored. Raise an
+---error with a short, readable first line if it is missing or cannot be used.
+---@param handle ReadHandle the handle to the saved data
+---@return void
+function SerializationCallbacks:validate(handle) end
+
+---Optional, required sections only: return false while there is nothing to keep, so the
+---save does not require this module.
+---@return boolean
+function SerializationCallbacks:isRequired() end

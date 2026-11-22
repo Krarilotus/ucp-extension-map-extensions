@@ -1,4 +1,4 @@
-"""Exercise the installed framework boundary, not a substitute proxy."""
+"""The public API through the framework's real extension proxy."""
 import hashlib
 import os
 from pathlib import Path
@@ -11,7 +11,7 @@ from test_required_state import runtime
 
 
 @pytest.mark.parametrize("runtime_type", [Lua54, LuaJIT], ids=["lua54", "luajit21"])
-def test_required_state_results_through_framework_proxy(runtime_type):
+def test_api_through_framework_proxy(runtime_type):
     path = os.environ.get("UCP_FRAMEWORK_PROXIES")
     if not path:
         pytest.skip("Set UCP_FRAMEWORK_PROXIES to the pinned framework proxies.lua; CI requires it")
@@ -22,17 +22,24 @@ def test_required_state_results_through_framework_proxy(runtime_type):
     lua = runtime(runtime_type)
     lua.globals().framework_proxies = lua.execute(source.decode())
     lua.execute('''
-      for _,name in ipairs({'memory','game','callbacks'}) do
-        package.loaded['mapextensions.'..name]={}
-      end
+      package.loaded['mapextensions.memory']={}
+      package.loaded['mapextensions.callbacks']={}
+      package.loaded['mapextensions.game']={getNativeSaveInterface=function()
+        return {version=1,failureHandling=1,readContext=1} end}
       local api,metadata=dofile(root..'/init.lua')
-      -- main.lua supplies this default when a module omits its metadata.
+      -- main.lua supplies this default when a module has no metadata.
       metadata=metadata or {public={},proxy={}}
       local owner=framework_proxies.ExtensionProxy(api,metadata.proxy)
       owner:registerSection('a',callbacks,
         {required=true,format='state-1',fingerprint=string.rep('a',64)})
+      owner:registerSection('plain',callbacks)
+      assert(required.providers.a and not required.providers.plain)
       assert(owner:requiredStateVersion()==1)
       assert(owner:requiredStateMapPolicyVersion()==1)
+      local features=owner:getNativeSaveInterface()
+      assert(features.failureHandling==1 and features.readContext==1)
+      assert(not pcall(owner.registerSection,owner,'a',callbacks))
+      -- For Recorder: plain copies through the proxy; editing them changes nothing.
       local integrity=owner:requiredStateIntegrity()
       assert(next(integrity)=='a' and integrity.a.digest=='state-digest-1')
       integrity.a.digest='edited'
@@ -56,6 +63,4 @@ def test_required_state_results_through_framework_proxy(runtime_type):
       registry.a.isRequired=function()return false end
       assert(next(owner:requiredStateIntegrity())==nil)
       assert(next(owner:requiredStateContracts())==nil)
-      owner:observeRequiredStateBoundary()
-      assert(next(owner:requiredStateBoundaryIntegrity())==nil)
     ''')
