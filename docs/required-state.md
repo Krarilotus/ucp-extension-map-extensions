@@ -27,13 +27,39 @@ A module can declare the optional policy explicitly with
 can continue without the module and its effects. The absent module's entries
 are skipped, and a later save written without it does not carry those entries
 forward. Existing required saves still require their registered provider.
-For launcher discovery, a module that writes required state should declare
-`save-state: required` in its definition once the launcher adds support.
+A module that writes a section also declares it for the launcher; see
+"Launcher declaration" below.
 
 A required section needs `initialize`, `serialize`, `deserialize` and
 `validate(handle)`. It may also have `isRequired()`, which returns false while the
 module has nothing to keep (for example when its features are switched off). The
 section is then still saved, but the save does not require the module.
+
+## Launcher declaration: `save-state`
+
+A module that registers a section says so in its `definition.yml`. The launcher
+uses it to warn before the module is turned off, uninstalled or replaced by a
+family switch. Map Extensions does not read the key: whether a save loads is
+always decided by the save itself (provider, format and schema).
+
+```yaml
+save-state: required   # saves can need this module
+```
+
+| `save-state` | Registration | Loading a save without the module | Launcher warning |
+| --- | --- | --- | --- |
+| `required` | `registerSection(name, callbacks, {required = true, ...})`, also when `isRequired()` can return false | Refused at the Load action before the world is read; the dialog names the module and version and the game returns to the main menu | "Saves made with this module need it" |
+| `optional` | `registerSection(name, callbacks)` or `{required = false, fallback = 'vanilla'}` | Loads; the module's entries are skipped and that part plays like the unmodded game. A later save drops them | "Saves made with this module lose its data without it" |
+| no key | none | Unaffected | None |
+
+- Declare one value. A module that can ever write a required section declares
+  `required`, even if some settings make a particular save optional.
+- The value describes the module's contract, not one save. It never refuses a
+  load and never replaces the save's own list.
+- Launchers and UCP versions that don't know the key ignore it, as they do with
+  `tags`.
+- Loading a multiplayer save made with a different set of modules, versions or
+  settings is not advised, whatever the declarations say.
 
 ## Saving
 
