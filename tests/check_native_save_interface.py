@@ -64,12 +64,12 @@ game.enlargeMemoryAllocation(128000000)
 game.registerReadWriteSavHooks(0x70000000,1337,{})
 features=game.getNativeSaveInterface()
 binding=require('mapextensions.readcontext').resolve(scan('83 EC 0C 53 56 8B F1 8B 46 20'))
-call,cleanup=require('mapextensions.loadrefusal').resolve(features.readWorld,features.sections,features.packager)
+call,cleanup,gameMode=require('mapextensions.loadrefusal').resolve(features.readWorld,features.sections,features.packager)
 require('mapextensions.archiveprobe').resolveDecoder()
 ''')
     read_world = scans['83 EC 0C 53 56 8B F1 8B 46 20']
     write_world = scans['83 EC 10 53 55 56 8B F1 8B 46 20']
-    assert len(scans) == 8, sorted(scans)
+    assert len(scans) == 9, sorted(scans)
     assert hooks[:2] == [read_world, write_world] and len(hooks) == 3
     assert patched == [read_world + 0x0D, write_world + 0x14]
     f = g.features
@@ -87,7 +87,7 @@ require('mapextensions.archiveprobe').resolveDecoder()
             'uniqueScans': len(scans), 'hooks': len(hooks), 'nativeSections': len(entries),
             'readWorld': hex(read_world), 'writeWorld': hex(write_world),
             'fileNameGetter': hex(g.binding.resourceFileName),
-            'loadCall': hex(g.call), 'loadCleanup': hex(g.cleanup)}
+            'loadCall': hex(g.call), 'loadCleanup': hex(g.cleanup), 'gameMode': hex(g.gameMode)}
 
 
 if __name__ == '__main__':
