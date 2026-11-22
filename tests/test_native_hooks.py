@@ -70,11 +70,11 @@ def test_missing_owner_requests_menu_and_signals_native_refusal(runtime):
       package.loaded['mapextensions.loadrefusal']={
         resolve=function() return 100, 200 end, install=function() return 300 end}
       package.loaded['mapextensions.archiveprobe']={
-        resolveDecoder=function() end, read=function() return 'archive' end}
+        resolveDecoder=function() end, read=function() return 'archive' end,
+        openGameSave=function(path) assert(path=='test.sav'); return {close=function() return true end} end}
       package.loaded['mapextensions.readcontext'].resolve=function()
         return {},function() return {kind='save'}, 'test.sav' end
       end
-      io.open=function() return {close=function() end} end
       package.loaded['mapextensions.loadmessage']=function(name)
         assert(name=='battle'); notices=notices+1
       end
