@@ -13,15 +13,15 @@ local messages = {
 }
 
 local unreadable = {
-  english = 'This save could not be read. Its module data is damaged or unsupported.',
-  german = 'Dieser Spielstand konnte nicht gelesen werden. Seine Moduldaten sind beschädigt oder werden nicht unterstützt.',
-  french = 'Cette sauvegarde n’a pas pu être lue. Ses données de module sont endommagées ou non prises en charge.',
-  russian = 'Не удалось прочитать это сохранение. Данные модулей повреждены или не поддерживаются.',
-  hungarian = 'Ezt a mentést nem sikerült beolvasni. A moduladatai sérültek vagy nem támogatottak.',
-  turkish = 'Bu kayıt okunamadı. Modül verileri bozuk veya desteklenmiyor.',
-  chinese = '无法读取此存档。其模块数据已损坏或不受支持。',
-  spanish = 'No se pudo leer esta partida guardada. Sus datos de módulo están dañados o no son compatibles.',
-  persian = 'این ذخیره خوانده نشد. داده‌های ماژول آن آسیب دیده یا پشتیبانی نمی‌شود.',
+  english = 'This save could not be read.',
+  german = 'Dieser Spielstand konnte nicht gelesen werden.',
+  french = 'Cette sauvegarde n’a pas pu être lue.',
+  russian = 'Не удалось прочитать это сохранение.',
+  hungarian = 'Ezt a mentést nem sikerült beolvasni.',
+  turkish = 'Bu kayıt okunamadı.',
+  chinese = '无法读取此存档。',
+  spanish = 'No se pudo leer esta partida guardada.',
+  persian = 'این ذخیره خوانده نشد.',
 }
 
 local function language()
