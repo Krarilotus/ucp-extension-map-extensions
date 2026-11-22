@@ -7,6 +7,7 @@ local readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
 local writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
 
 local nativeSaveInterface
+local lastLoadRefusal
 
 local function expect(address, pattern, what)
   local offset = 0
@@ -79,32 +80,64 @@ local function refuseSaving(result)
   return 0
 end
 
-local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks)
+local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks, allowRefusal)
   assert(nativeSaveInterface == nil, 'Map Extensions save hooks are already installed')
 
   -- Hooks
   -- read map or sav
   local ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
+  local status
+  local probe, decompress
+  if allowRefusal then
+    local refusal = require('mapextensions.loadrefusal')
+    local call, cleanup = refusal.resolve(readWorld, originalMapSectionInfoArray, ptr_FilePackagerObj)
+    probe = require('mapextensions.archiveprobe')
+    decompress = probe.resolveDecoder()
+    status = refusal.install(call, cleanup, readWorld)
+  end
   -- Which file is being read: modules start fresh on a .map and restore on a .sav.
   local filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
 
   local originalReadSav
   originalReadSav = core.hookCode(function(this, ptrMapSectionAddressArray)
+    lastLoadRefusal = nil
     local result
+    local started
     local ok, reason = xpcall(function()
       if originalMapSectionInfoArray ~= ptrMapSectionAddressArray then error("argument is not what we expected") end
-      local context = readContext()
+      local context, path = readContext()
+      if status and core.readInteger(status) == 1 then
+        local file = assert(io.open(path, 'rb'))
+        local readable, bytes = pcall(probe.read, file, decompress)
+        file:close()
+        assert(readable, bytes)
+        callbacks.admit(bytes, context)
+      end
 
       log(3, "readSavHook: beforeReadSav()")
       callbacks.beforeReadSav(context)
 
       log(3, "readSavHook: originalReadSav()")
+      started = true
       result = originalReadSav(this, customMapSectionInfoArray)
 
       log(3, "readSavHook: afterReadSav()")
       callbacks.afterReadSav(context)
     end, debug.traceback)
-    if not ok then stopLoading(reason) end
+    if not ok then
+      local name, version
+      if callbacks.missingOwner then name, version = callbacks.missingOwner(reason) end
+      if name and not started and status and core.readInteger(status) == 1 then
+        lastLoadRefusal = name
+        core.writeInteger(status, 2)
+        modules.ui:switchToMenu() -- the UI owner requests the main menu
+        log(WARNING, 'Map Extensions: refused save requiring ' .. name .. ' (' .. version .. ') before native read')
+        local shown, messageError = pcall(require('mapextensions.loadmessage'), name, version)
+        if not shown then log(ERROR, tostring(messageError)) end
+        return 0
+      end
+      stopLoading(name and ('This save needs the module ' .. name) or reason)
+    end
     return result
 
   end, readWorld, 2, CallingConvention.THISCALL, 5)
@@ -181,7 +214,8 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
 
   nativeSaveInterface = {
     version = 1,
-    failureHandling = 1, -- a rejected load stops the game; a failed save is not written
+    failureHandling = 1, -- keeps the existing error contract for unexpected failures
+    earlyRequiredAdmission = status and 1 or nil,
     readContext = 1,     -- callbacks learn whether a .map or a .sav is being loaded
     -- For Recorder: the same addresses these hooks use, so it needs no scans of its own.
     resources = filenameBinding.resources,
@@ -194,6 +228,12 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     readWorld = readWorld,   -- wrapped: calling it runs Map Extensions' load callbacks
     writeWorld = writeWorld, -- wrapped: calling it runs Map Extensions' save callbacks
   }
+end
+
+local function takeLoadRefusal()
+  local name = lastLoadRefusal
+  lastLoadRefusal = nil
+  return name
 end
 
 -- A fresh copy each time, so callers cannot change Map Extensions' own table.
@@ -210,4 +250,5 @@ return {
   updateCustomSectionInfoObject = updateCustomSectionInfoObject,
   registerReadWriteSavHooks = registerReadWriteSavHooks,
   getNativeSaveInterface = getNativeSaveInterface,
+  takeLoadRefusal = takeLoadRefusal,
 }

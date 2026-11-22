@@ -27,9 +27,11 @@ def check(path):
     lua = LuaRuntime(unpack_returned_tuples=True, encoding='latin-1')
     scans, hooks, patched = {}, [], []
 
-    def scan(pattern):
+    def scan(pattern, start=None, stop=None):
         expression = b''.join(b'.' if t == '?' else re.escape(bytes([int(t, 16)])) for t in pattern.split())
-        matches = list(re.finditer(expression, image, re.DOTALL))
+        first = start - base if start is not None else 0
+        last = stop - base if stop is not None else len(image)
+        matches = list(re.compile(expression, re.DOTALL).finditer(image, first, last))
         assert len(matches) == 1, (pattern, len(matches))
         scans[pattern] = base + matches[0].start()
         return scans[pattern]
@@ -49,7 +51,7 @@ log=function() end
 core={AOBScan=scan,readInteger=read_int,readByte=read_byte,readString=read_string,
  writeCodeInteger=function(address,value) mark_patch(address,value) end,
  exposeCode=function(_,count,convention)
-  assert(count==1 and convention==1); return function() error('no native calls in this check') end
+  assert((count==1 or count==6) and convention==1); return function() error('no native calls in this check') end
  end,
  hookCode=function(_,address,count,convention,size)
   assert(count==2 and convention==1 and size==5); mark_hook(address)
@@ -62,10 +64,12 @@ game.enlargeMemoryAllocation(128000000)
 game.registerReadWriteSavHooks(0x70000000,1337,{})
 features=game.getNativeSaveInterface()
 binding=require('mapextensions.readcontext').resolve(scan('83 EC 0C 53 56 8B F1 8B 46 20'))
+call,cleanup=require('mapextensions.loadrefusal').resolve(features.readWorld,features.sections,features.packager)
+require('mapextensions.archiveprobe').resolveDecoder()
 ''')
     read_world = scans['83 EC 0C 53 56 8B F1 8B 46 20']
     write_world = scans['83 EC 10 53 55 56 8B F1 8B 46 20']
-    assert len(scans) == 5, sorted(scans)
+    assert len(scans) == 8, sorted(scans)
     assert hooks[:2] == [read_world, write_world] and len(hooks) == 3
     assert patched == [read_world + 0x0D, write_world + 0x14]
     f = g.features
@@ -82,7 +86,8 @@ binding=require('mapextensions.readcontext').resolve(scan('83 EC 0C 53 56 8B F1 
     return {'file': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
             'uniqueScans': len(scans), 'hooks': len(hooks), 'nativeSections': len(entries),
             'readWorld': hex(read_world), 'writeWorld': hex(write_world),
-            'fileNameGetter': hex(g.binding.resourceFileName)}
+            'fileNameGetter': hex(g.binding.resourceFileName),
+            'loadCall': hex(g.call), 'loadCleanup': hex(g.cleanup)}
 
 
 if __name__ == '__main__':

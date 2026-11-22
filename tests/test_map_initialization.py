@@ -24,7 +24,7 @@ def test_map_policy_missing_changed_provider_and_save_admission(runtime_type):
       required.validate(zip(entries),{kind='map'})
       assert(validates==1)
       assert(not pcall(required.validate,zip(entries),{kind='save'}))
-      required.providers.tunnelers.fingerprint=string.rep('b',64)
+      required.providers.tunnelers.format='state-2'
       required.validate(zip(entries),{kind='map'})
       assert(not pcall(required.validate,zip(entries),{kind='save'}))
       registry.tunnelers=nil;required.providers.tunnelers=nil

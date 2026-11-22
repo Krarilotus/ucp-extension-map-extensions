@@ -18,7 +18,9 @@ local sections = {
       handle:put("extensions.yml", yaml.dump(Deproxy(USER_CONFIG['config-full']['load-order'])))
 
       local f = io.open("ucp/ucp-version.yml")
-      local versionInfo = yaml.parse(f:read("*all"))
+      local rawVersion = f:read("*all")
+      f:close()
+      local versionInfo = yaml.parse(rawVersion)
       handle:put("meta.yml", yaml.dump({
         version = '1.0.0',
         framework = versionInfo,

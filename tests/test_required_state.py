@@ -70,7 +70,7 @@ def test_missing_changed_and_duplicate_modules_rejected_before_callbacks():
       local path='framework/required-state.yml'
       local original=entries[path]
       for _,invalid in ipairs({original:gsub('name: "a"','name: "missing"'),
-          original:gsub('state%-1','state-2'),original:gsub(string.rep('a',64),string.rep('b',64)),
+          original:gsub('state%-1','state-2'),original:gsub('schema: 1','schema: 2'),
           original..original:match('  %- name:.*'),string.rep(' ',131073)}) do
         entries[path]=invalid
         assert(not pcall(required.validate,zip(entries)))
@@ -108,7 +108,7 @@ def test_a_module_with_nothing_to_keep_is_not_required():
       assert(required.manifest()=='version: 1\\nproviders: []\\n')
       required.validate(zip(saved)) -- A save that did require it still validates.
       required.providers.a.fingerprint=string.rep('b',64)
-      assert(not pcall(required.validate,zip(saved)))
+      required.validate(zip(saved)) -- the save trusts the schema, not a replay fingerprint
     ''')
 
 
@@ -118,6 +118,24 @@ def test_plain_sections_keep_working():
       registry.plain=callbacks
       assert(required.manifest()=='version: 1\\nproviders: []\\n')
       assert(required.providers.plain==nil)
+    ''')
+
+
+def test_schema_migration_is_visible_to_the_owner_and_replay_hash_is_separate():
+    runtime().execute(r'''
+      register('a')
+      local entries=archive()
+      entries['framework/required-state.yml'] =
+        entries['framework/required-state.yml']:gsub('    schema: 1\n','')
+      required.register('a', callbacks, {required=true, format='state-1', schema=2,
+        acceptedSchemas={1}, version='1.2.3', fingerprint=string.rep('b',64)})
+      callbacks.validate=function(_,handle) assert(handle.schema==1 and handle.required) end
+      assert(required.admit(zip(entries)).a==1 and validates==0)
+      required.validate(zip(entries))
+      assert(required.contracts().a.fingerprint==string.rep('b',64))
+      assert(required.manifest():find('moduleVersion: "1.2.3"',1,true))
+      required.register('optional',callbacks,{required=false,fallback='vanilla'})
+      assert(not required.providers.optional)
     ''')
 
 

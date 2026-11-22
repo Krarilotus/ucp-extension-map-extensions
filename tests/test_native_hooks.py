@@ -37,10 +37,10 @@ package.loaded['mapextensions.readcontext']={resolve=function()
   return {},function() return {kind='save'} end
 end}
 game=require('mapextensions.game')
-function install(callbacks)
+function install(callbacks, allowRefusal)
   for _,name in ipairs({'beforeReadSav','afterReadSav','beforeWriteSav','afterWriteSav',
       'afterReadDirectoryOfSav'}) do callbacks[name]=callbacks[name] or function() end end
-  game.registerReadWriteSavHooks(300000,1337,callbacks)
+  game.registerReadWriteSavHooks(300000,1337,callbacks,allowRefusal)
   sections=100100 -- the first scan: the game's own section table
 end
 -- RPS: a Lua error in a hook becomes a 0 return to the game.
@@ -61,6 +61,35 @@ def lua_host(runtime):
     lua.globals().root = ROOT.as_posix()
     lua.execute(HOST)
     return lua
+
+
+@pytest.mark.parametrize('runtime', [Lua54, LuaJIT], ids=['lua54', 'luajit21'])
+def test_missing_owner_requests_menu_and_signals_native_refusal(runtime):
+    lua_host(runtime).execute('''
+      local status, menus, notices = 1, 0, 0
+      package.loaded['mapextensions.loadrefusal']={
+        resolve=function() return 100, 200 end, install=function() return 300 end}
+      package.loaded['mapextensions.archiveprobe']={
+        resolveDecoder=function() end, read=function() return 'archive' end}
+      package.loaded['mapextensions.readcontext'].resolve=function()
+        return {},function() return {kind='save'}, 'test.sav' end
+      end
+      io.open=function() return {close=function() end} end
+      package.loaded['mapextensions.loadmessage']=function(name)
+        assert(name=='battle'); notices=notices+1
+      end
+      modules={ui={switchToMenu=function() menus=menus+1 end}}
+      core.readInteger=function(address) return address == 300 and status or 200000 end
+      core.writeInteger=function(address,value) assert(address == 300); status=value end
+      install({admit=function(bytes)
+        assert(bytes=='archive'); error({name='battle',version='1.2.3'},0)
+      end,
+        missingOwner=function(reason) return reason.name, reason.version end},true)
+      assert(hooks[1](200000,sections)==0)
+      assert(nativeCalls==0 and menus==1 and notices==1 and status==2 and levels()=='-1')
+      assert(messages[1].text:find('before native read',1,true))
+      assert(game.takeLoadRefusal()=='battle' and game.takeLoadRefusal()==nil)
+    ''')
 
 
 @pytest.mark.parametrize('runtime', [Lua54, LuaJIT], ids=['lua54', 'luajit21'])

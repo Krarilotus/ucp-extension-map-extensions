@@ -28,7 +28,7 @@ function M.resolve(readWorld)
   local function capture()
     -- Call the game's own function, so a module that redirects it (such as Recorder) still works.
     local path = core.readString(getter(resources))
-    return {kind = path:lower():match('%.map$') and 'map' or 'save'}
+    return {kind = path:lower():match('%.map$') and 'map' or 'save'}, path
   end
   return binding, capture
 end

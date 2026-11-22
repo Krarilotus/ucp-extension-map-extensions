@@ -21,7 +21,7 @@ api = {
 
     memory.initialize()
 
-    game.registerReadWriteSavHooks(memory.customMapSectionInfoArray, constants.CUSTOM_SECTION_ID, callbacks)
+    game.registerReadWriteSavHooks(memory.customMapSectionInfoArray, constants.CUSTOM_SECTION_ID, callbacks, true)
 
   end,
 
@@ -33,8 +33,7 @@ api = {
 ---Register custom section in .sav files
 ---@param extensionName string extension name of the extension registering the section
 ---@param serializationCallbacks SerializationCallbacks functions for (de)serialization of data
----@param options table|nil {required=true, format=..., fingerprint=..., initializeOnMap=...}
---- marks game state the save cannot do without; see docs/required-state.md
+---@param options table|nil Section admission policy and schema. See docs/required-state.md.
 ---@return void
 function api:registerSection(extensionName, serializationCallbacks, options)
   if registry[extensionName] ~= nil then 
@@ -53,6 +52,12 @@ function api:requiredStateMapPolicyVersion() return 1 end
 ---readContext, and for Recorder the section table, the file packager and the two wrapped
 ---save functions (call those, never the unwrapped originals).
 function api:getNativeSaveInterface() return game.getNativeSaveInterface() end
+
+---The ZIP for section 1337, without a native save or a write to game memory.
+function api:captureSaveSection() return callbacks.captureSections() end
+
+---A caller of the native Load action consumes the refused provider before seeking again.
+function api:takeLoadRefusal() return game.takeLoadRefusal() end
 
 -- For Recorder: copies and digests of the required sections, without saving the game.
 -- They return detached tables; editing them changes nothing in the modules.

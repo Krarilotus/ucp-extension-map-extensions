@@ -110,3 +110,45 @@ def test_loading_continues_when_the_debug_copy_fails(runtime):
       assert(restored == 'saved')
       assert(#warnings == 1)
     ''')
+
+
+@pytest.mark.parametrize('runtime', [Lua54, LuaJIT], ids=['lua54', 'luajit21'])
+def test_capture_uses_every_provider_and_normal_load_restores_them(runtime):
+    lua = runtime(unpack_returned_tuples=True)
+    lua.globals().root = ROOT.as_posix()
+    lua.execute(HOST)
+    lua.execute(r'''
+      saved = {writable = true}
+      archive = 'zip bytes'
+      yaml = {parse = function()
+        return {version = 1, providers = {{name = 'battle', format = 'battle-1',
+          fingerprint = string.rep('a', 64)}}}
+      end}
+      local restored, started = {}, false
+      local function get(_, handle) assert(handle:get('state.bin') == 'first\0second') end
+      local function put(_, handle) handle:put('state.bin', 'first\0second') end
+      registry.battle = {capture = put,
+        serialize = function() error('capture must avoid ordinary save side effects') end,
+        validate = get, integrity = function() return 'digest' end,
+        initialize = function() end, deserialize = function(self, handle)
+          get(self, handle); restored.battle = true
+        end}
+      require('mapextensions.required').register('battle', registry.battle,
+        {required=true, format='battle-1', fingerprint=string.rep('a',64)})
+      registry.optional = {serialize = put, deserialize = function(self, handle)
+        get(self, handle); restored.optional = true
+      end}
+      local point = callbacks.captureSections()
+      assert(writes == 0 and memory.customSectionInfoObject.size == 0)
+      assert(saved['framework/required-state.yml'] and saved['battle/state.bin'] and saved['optional/state.bin'])
+      io.open = function() return nil, 'no cache folder' end
+      memory.customSectionInfoObject.size = #point
+      callbacks.afterReadSav({kind='save'})
+      assert(restored.battle and restored.optional)
+
+      registry.battle = nil
+      registry.optional.initialize = function() started = true end
+      memory.customSectionInfoObject.size = 0
+      callbacks.afterReadSav({kind='save'})
+      assert(started, 'a save predating section 1337 initializes an optional provider')
+    ''')

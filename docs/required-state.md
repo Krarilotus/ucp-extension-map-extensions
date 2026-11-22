@@ -3,22 +3,32 @@
 Most sections a module saves are optional: a save still loads if the module is
 missing. Some modules, however, keep part of the running game in their section. AIC
 Tactics keeps an army's target and its next wave; Improved Tunnelers keeps tunnels
-that are still collapsing. Loading such a save without that data, or with data from
-a different module version, gives a different game than the one that was saved.
+that are still collapsing. Loading such a save without the required data can leave
+the match in a state that the stock game cannot continue.
 
 A module can mark its section as required:
 
 ```lua
 modules['map-extensions']:registerSection('my-module', callbacks, {
   required = true,
-  format = 'my-module-state-1',   -- changes when the saved data changes shape
-  fingerprint = moduleSha256,     -- SHA256 of the module's code
+  format = 'my-module-state',    -- stable format identifier
+  schema = 2,                    -- schema written by this version
+  acceptedSchemas = {1},         -- schemas the callbacks know how to migrate
+  fingerprint = moduleSha256,    -- SHA256 for replay compatibility and diagnostics
   initializeOnMap = true,         -- optional, see "Maps" below
 })
 ```
 
 Without the third argument nothing changes: `registerSection(name, callbacks)` works
 as before.
+
+A module can declare the optional policy explicitly with
+`{required = false, fallback = 'vanilla'}`. Use it only when the native world
+can continue without the module and its effects. The absent module's entries
+are skipped, and a later save written without it does not carry those entries
+forward. Existing required saves still require their registered provider.
+For launcher discovery, a module that writes required state should declare
+`save-state: required` in its definition once the launcher adds support.
 
 A required section needs `initialize`, `serialize`, `deserialize` and
 `validate(handle)`. It may also have `isRequired()`, which returns false while the
@@ -27,8 +37,11 @@ section is then still saved, but the save does not require the module.
 
 ## Saving
 
-Each save gets a short list, `framework/required-state.yml`, naming the modules whose
-sections were required and their `format` and `fingerprint`.
+Each save gets a list, `framework/required-state.yml`, with the required
+providers, formats, schemas, and fingerprints. The module version comes from
+the active load order when the section and module names match. A differently
+named provider can pass its package version in the registration's `version`.
+Old entries that lack a schema are read as schema 1.
 
 If anything fails before the game writes the file, the save is not written. An
 existing file with that name stays as it was, the player sees a message, and the
@@ -36,17 +49,21 @@ match continues.
 
 ## Loading
 
-1. Map Extensions checks the list: every module named in it must be installed, with
-   the same `format` and `fingerprint`.
+1. On the usual Load action Map Extensions checks the list before calling the
+   native world reader. Each required provider must accept the format and saved
+   schema. The dialog names the missing or incompatible module and saved
+   version (the format identifier for older saves) and returns to the main
+   menu. A code fingerprint change alone does not reject a normal save.
 2. Every module's `validate(handle)` runs. It should check its data and raise an error
    if the data is missing or cannot be used. `handle.loadKind` is `'map'` or `'save'`;
    `handle.required` tells whether the saved list named this module.
+   `handle.schema` is available to both callbacks so owners can validate and
+   migrate older accepted data before applying it.
 3. Only when all checks pass are the sections restored, in alphabetical order.
 
-When a check fails, part of the game has already been replaced by the file's
-contents; the game cannot continue in that state. Map Extensions shows the first line
-of the error (keep it short and readable) and the game closes. The full error goes to
-`ucp3-error-log.log`.
+Unexpected native read failures and module exceptions after native loading still
+take the existing fatal path. Other native reader callers use their own world
+transition and cannot use the standard Load action's refusal return.
 
 Callbacks receive `{kind='map'}` or `{kind='save'}`: `initialize(context)`, and
 `loadKind` on the handles. A file is a map when its name ends in `.map`. Do not use
@@ -74,6 +91,13 @@ A required section also needs `capture(handle)` and `integrity()` for Recorder
 
 Recorder takes snapshots and compares a replay with its recording without saving
 the game. It uses:
+
+- `captureSaveSection()`: the complete normal save ZIP for section 1337. This
+  runs every registered writer. Optional providers can supply a read-only
+  `capture(handle)` when ordinary `serialize(handle)` has side effects. A
+  provider returning state from either callback must produce compatible bytes.
+- `takeLoadRefusal()`: consumes the refused provider name after the native
+  Load action. A caller must check this before attempting a second world read.
 
 - `captureRequiredSections()`: copies of the list and of every required section;
 - `requiredStateIntegrity()` and `requiredStateContracts()`: each module's digest,
