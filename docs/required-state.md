@@ -1,78 +1,118 @@
-# Required simulation state
+# Game state a save cannot do without
 
-Map Extensions 1.1.0 adds an opt-in contract to the existing save section owner.
-Two-argument `registerSection(name, callbacks)` registrations keep their API.
-Simulation providers register a third argument:
+Most sections a module saves are optional: a save still loads if the module is
+missing. Some modules, however, keep part of the running game in their section. AIC
+Tactics keeps an army's target and its next wave; Improved Tunnelers keeps tunnels
+that are still collapsing. Loading such a save without the required data can leave
+the match in a state that the stock game cannot continue.
+
+A module can mark its section as required:
 
 ```lua
 modules['map-extensions']:registerSection('my-module', callbacks, {
   required = true,
-  format = 'my-state-1',
-  fingerprint = packageSha256,
+  format = 'my-module-state',    -- stable format identifier
+  schema = 2,                    -- schema written by this version
+  acceptedSchemas = {1},         -- schemas the callbacks know how to migrate
+  fingerprint = moduleSha256,    -- SHA256 for replay compatibility and diagnostics
+  initializeOnMap = true,         -- optional, see "Maps" below
 })
 ```
 
-The provider supplies `initialize`, `serialize`, `deserialize`, `validate`,
-`capture` and `integrity` methods. `validate(readHandle)` must reject missing or
-incompatible state before making any state change. All validators run before
-the first deserialize callback. `capture(writeHandle)` must only read state;
-it must not call native save, change simulation state, advance RNG or write files.
-`integrity()` returns a bounded deterministic digest of simulation state. It is
-an observation hook, not a substitute for validation or package authentication.
+Without the third argument nothing changes: `registerSection(name, callbacks)` works
+as before.
 
-An optional read-only `isRequired()` predicate may return false when the provider
-has no active simulation policy. Its state remains an ordinary save section, but
-does not impose a module requirement on Native-only saves or recording checkpoints.
-Validators still run and must reject an unsafe missing-state restore. A manifest
-that lists a provider always requires that provider and its original identity,
-regardless of its current predicate result.
-During validation `readHandle.required` identifies sections required by the saved
-manifest; required payloads must be present even when the current policy is off.
+A module can declare the optional policy explicitly with
+`{required = false, fallback = 'vanilla'}`. Use it only when the native world
+can continue without the module and its effects. The absent module's entries
+are skipped, and a later save written without it does not carry those entries
+forward. Existing required saves still require their registered provider.
+For launcher discovery, a module that writes required state should declare
+`save-state: required` in its definition once the launcher adds support.
 
-`framework/required-state.yml` records the format and SHA256 package identity of
-each required provider. Missing providers and mismatched identities stop restore.
-An older save without this manifest still invokes current validators; the provider
-decides whether native initialization is safe. Registered callbacks run by sorted
-section name. Names and format IDs are restricted ASCII identifiers, providers
-are limited to 256 and the manifest to 128 KiB. Read-only captures allow at most
-4,096 flat entries and the existing custom-section byte capacity.
+A required section needs `initialize`, `serialize`, `deserialize` and
+`validate(handle)`. It may also have `isRequired()`, which returns false while the
+module has nothing to keep (for example when its features are switched off). The
+section is then still saved, but the save does not require the module.
 
-Recorders use API version 1: `requiredStateVersion()`,
-`captureRequiredSections()`, `requiredStateContracts()` and
-`requiredStateIntegrity()`. Capture returns the manifest and provider entries
-for the recorder's existing extension ZIP. Contracts and integrity results are
-detached ordinary tables, declared in the module's proxy metadata so recorders
-can iterate and serialize them in Lua and LuaJIT. Editing a returned table does
-not change provider state or later snapshots. No additional native save format,
-ZIP implementation or simulation scan is introduced.
+## Saving
 
-`observeRequiredStateBoundary()` retains the last complete recorder boundary;
-`requiredStateBoundaryIntegrity()` returns its digests even after live state has
-changed. A provider may supply paired `observeBoundary()` and
-`boundaryIntegrity()` callbacks to defer hashing: the first copies into bounded
-observation storage, the second hashes that copy. Providers without the pair
-have their ordinary digest retained eagerly. Observation errors invalidate the
-whole boundary. This storage never drives the simulation or replaces saved state.
+Each save gets a list, `framework/required-state.yml`, with the required
+providers, formats, schemas, and fingerprints. The module version comes from
+the active load order when the section and module names match. A differently
+named provider can pass its package version in the registration's `version`.
+Old entries that lack a schema are read as schema 1.
 
-Native game loaders and Map Extensions 1.0.0 cannot enforce this new manifest.
-Loading required-state saves through those readers is unsupported. This API
-also does not perform a multiplayer lobby handshake; peer content admission is
-a separate responsibility. Source integration and acceptance status must be
-reported separately before a release.
+If anything fails before the game writes the file, the save is not written. An
+existing file with that name stays as it was, the player sees a message, and the
+match continues.
 
-## Editable maps (1.1.5)
+## Loading
 
-`requiredStateMapPolicyVersion()` returns 1. A provider whose battle state should
-start fresh for maps can register `initializeOnMap=true` in its existing options.
-The manifest records this opt-in. When the native filename owner identifies a
-`.map` load (including a `.sav` renamed to `.map`), that saved provider no longer
-requires its original module content to open the scenario. If currently installed
-and opted in, its `initialize({kind='map'})` runs instead of validation/restore.
-Editor loads and new matches therefore do not reuse stale queue entries or unit
-references. Ordinary `.sav`, autosave and Recorder snapshot loads remain strict.
+1. On the usual Load action Map Extensions checks the list before calling the
+   native world reader. Each required provider must accept the format and saved
+   schema. The dialog names the missing or incompatible module and saved
+   version (the format identifier for older saves) and returns to the main
+   menu. A code fingerprint change alone does not reject a normal save.
+2. Every module's `validate(handle)` runs. It should check its data and raise an error
+   if the data is missing or cannot be used. `handle.loadKind` is `'map'` or `'save'`;
+   `handle.required` tells whether the saved list named this module.
+   `handle.schema` is available to both callbacks so owners can validate and
+   migrate older accepted data before applying it.
+3. Only when all checks pass are the sections restored, in alphabetical order.
 
-Providers without the option retain their existing behavior. Other providers'
-requirements are not relaxed. This adds no filename scan, editor hook, alternate
-save format or changes to native world sections; it reuses the read context
-already supplied by 1.1.4. Lua owner/codec tests cover renamed maps and fresh-state
-round trips; actual in-game editor acceptance must still be recorded separately.
+Unexpected native read failures and module exceptions after native loading still
+take the existing fatal path. Other native reader callers use their own world
+transition and cannot use the standard Load action's refusal return.
+
+Callbacks receive `{kind='map'}` or `{kind='save'}`: `initialize(context)`, and
+`loadKind` on the handles. A file is a map when its name ends in `.map`. Do not use
+the game tick to guess: maps saved in the editor can have a tick, too.
+
+## Maps
+
+A save renamed to `.map` becomes a new scenario. Sections registered with
+`initializeOnMap = true` are not checked or restored for a map; `initialize` runs
+instead, so the new scenario starts without the old battle's state. The saved list
+records this, so the map also opens when that module is not installed. Other
+sections keep their rules.
+
+A required section also needs `capture(handle)` and `integrity()` for Recorder
+(below). `capture` puts the same data as `serialize` but must not change anything;
+`integrity` returns a short digest of the module's state.
+
+## Feature checks
+
+`requiredStateVersion()` and `requiredStateMapPolicyVersion()` return 1.
+`getNativeSaveInterface()` returns `version=1`, `failureHandling=1` and
+`readContext=1` after Map Extensions is enabled, plus the addresses below.
+
+## For Recorder
+
+Recorder takes snapshots and compares a replay with its recording without saving
+the game. It uses:
+
+- `captureSaveSection()`: the complete normal save ZIP for section 1337. This
+  runs every registered writer. Optional providers can supply a read-only
+  `capture(handle)` when ordinary `serialize(handle)` has side effects. A
+  provider returning state from either callback must produce compatible bytes.
+- `takeLoadRefusal()`: consumes the refused provider name after the native
+  Load action. A caller must check this before attempting a second world read.
+
+- `captureRequiredSections()`: copies of the list and of every required section;
+- `requiredStateIntegrity()` and `requiredStateContracts()`: each module's digest,
+  `format` and `fingerprint`;
+- `observeRequiredStateBoundary()` and `requiredStateBoundaryIntegrity()`: the
+  digests at one moment, kept until asked for. A module may supply
+  `observeBoundary()` and `boundaryIntegrity()` to copy first and hash later;
+- from `getNativeSaveInterface()`: the section table, the file packager and the two
+  save functions. These are the functions with Map Extensions' hooks; calling them
+  runs its callbacks. Never call the unhooked originals.
+
+All of these return copies: changing them changes nothing in the modules.
+
+## Not covered
+
+The game itself and Map Extensions 1.0.x cannot read the list, so they load such
+saves without these checks. This does not check what other players in a multiplayer
+lobby have installed.

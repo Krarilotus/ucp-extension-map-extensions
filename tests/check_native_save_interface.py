@@ -1,6 +1,11 @@
-"""Check the owner's existing AoB bindings on a private licensed native image.
+"""Check Map Extensions' game bindings against licensed game executables.
 
-Hook installation is simulated; no game is launched and no save is written.
+For each .exe: every scan must match exactly once (core.AOBScan uses the first match),
+the hooks must land on the functions those scans found, the buffer sizes must be found
+inside them, and the file-name lookup must resolve. Hook installation is simulated; the
+game is not started. Requires pefile and lupa.
+
+python tests/check_native_save_interface.py "C:/Games/Stronghold Crusader.exe" ...
 """
 import argparse
 import hashlib
@@ -13,80 +18,85 @@ import pefile
 from lupa.lua54 import LuaRuntime
 
 
-def check(reference, variant):
-    root=Path(__file__).resolve().parents[1]
-    raw=reference.read_bytes()
-    pe=pefile.PE(data=raw)
-    base=pe.OPTIONAL_HEADER.ImageBase
-    image=bytearray(pe.get_memory_mapped_image())
-    lua=LuaRuntime(unpack_returned_tuples=True, encoding='latin-1')
-    scans,installed=[],[]
+def check(path):
+    root = Path(__file__).resolve().parents[1]
+    raw = path.read_bytes()
+    pe = pefile.PE(data=raw)
+    base = pe.OPTIONAL_HEADER.ImageBase
+    image = bytearray(pe.get_memory_mapped_image())
+    lua = LuaRuntime(unpack_returned_tuples=True, encoding='latin-1')
+    scans, hooks, patched = {}, [], []
 
-    def scan(pattern):
-        expression=b''.join(b'.' if t=='?' else re.escape(bytes([int(t,16)])) for t in pattern.split())
-        matches=list(re.finditer(expression,image,re.DOTALL))
-        assert len(matches)==1,(pattern,len(matches))
-        address=base+matches[0].start()
-        scans.append(address)
-        return address
+    def scan(pattern, start=None, stop=None):
+        expression = b''.join(b'.' if t == '?' else re.escape(bytes([int(t, 16)])) for t in pattern.split())
+        first = start - base if start is not None else 0
+        last = stop - base if stop is not None else len(image)
+        matches = list(re.compile(expression, re.DOTALL).finditer(image, first, last))
+        assert len(matches) == 1, (pattern, len(matches))
+        scans[pattern] = base + matches[0].start()
+        return scans[pattern]
 
     def hook(address):
-        installed.append(address)
-        image[address-base:address-base+5]=b'\xe8\x11\x22\x33\x44'
+        hooks.append(address)
 
-    g=lua.globals()
-    g.root=root.as_posix();g.scan=scan;g.mark_hook=hook
-    g.read_int=lambda address:struct.unpack_from('<i',image,address-base)[0]
-    g.read_byte=lambda address:image[address-base]
-    g.read_string=lambda address,n:bytes(image[address-base:address-base+n])
+    g = lua.globals()
+    g.root = root.as_posix(); g.scan = scan; g.mark_hook = hook
+    g.mark_patch = lambda address, value: patched.append(address)
+    g.read_int = lambda address: struct.unpack_from('<i', image, address - base)[0]
+    g.read_byte = lambda address: image[address - base]
+    g.read_string = lambda address, n: bytes(image[address - base:address - base + n])
     lua.execute('''
 package.path=root..'/?.lua;'..package.path
+log=function() end
 core={AOBScan=scan,readInteger=read_int,readByte=read_byte,readString=read_string,
+ writeCodeInteger=function(address,value) mark_patch(address,value) end,
  exposeCode=function(_,count,convention)
-  assert(count==1 and convention==1); return function() error('No native execution in image check') end
+  assert((count==1 or count==6) and convention==1); return function() error('no native calls in this check') end
  end,
  hookCode=function(_,address,count,convention,size)
   assert(count==2 and convention==1 and size==5); mark_hook(address)
-  return function() error('Native save is outside this image check') end
+  return function() error('no native calls in this check') end
  end,
  detourCode=function(_,address,size) assert(size==7);mark_hook(address) end}
 CallingConvention={THISCALL=1}
 game=require('mapextensions.game')
-assert(not pcall(game.getNativeSaveInterface))
-game.registerReadWriteSavHooks(0x70000000,123,{})
-native=game.getNativeSaveInterface()
+game.enlargeMemoryAllocation(128000000)
+game.registerReadWriteSavHooks(0x70000000,1337,{})
+features=game.getNativeSaveInterface()
+binding=require('mapextensions.readcontext').resolve(scan('83 EC 0C 53 56 8B F1 8B 46 20'))
+call,cleanup=require('mapextensions.loadrefusal').resolve(features.readWorld,features.sections,features.packager)
+require('mapextensions.archiveprobe').resolveDecoder()
 ''')
-    n=g.native
-    expected={'SHC':(0xf2b3d0,0xb92a58,0x474a20,0x474480),
-              'Extreme':(0xf2b850,0xb92be8,0x474c50,0x4746b0)}[variant]
-    assert (n.packager,n.sections,n.readWorld,n.writeWorld)==expected
-    assert len(scans)==5 and len(installed)==3
-    assert n.readWorld in installed and n.writeWorld in installed
-    assert n.version==1 and n.sectionCount==122 and n.descriptorSize==16
-    assert n.readContext==1 and len(n.resourceFileNameBytes)==20
-    assert (n.resources,n.resourceFileName)==({'SHC':(0x11bf130,0x46c300),
-        'Extreme':(0x1293c20,0x46c520)}[variant])
-    descriptors=image[n.sections-base:n.sections-base+(n.sectionCount+1)*n.descriptorSize]
-    assert descriptors[-16:]==bytes(16)
-    entries=list(struct.iter_unpack('<IIIHH',descriptors[:-16]))
-    assert all(address and size and skip==0 for address,skip,size,_,_ in entries)
-    for _ in range(100):
-        result=g.game.getNativeSaveInterface()
-        assert result.readWorld==n.readWorld and result.sections==n.sections
-    assert len(scans)==5 and len(installed)==3
-    return {'variant':variant,'referenceSha256':hashlib.sha256(raw).hexdigest(),
-            'ownerScans':len(scans),'existingHooks':len(installed),
-            'nativeSections':len(entries),'repeatAccessesWithoutScans':100,
-            'scope':'Native image discovery with simulated hooks; no installed save/load.'}
+    read_world = scans['83 EC 0C 53 56 8B F1 8B 46 20']
+    write_world = scans['83 EC 10 53 55 56 8B F1 8B 46 20']
+    assert len(scans) == 8, sorted(scans)
+    assert hooks[:2] == [read_world, write_world] and len(hooks) == 3
+    assert patched == [read_world + 0x0D, write_world + 0x14]
+    f = g.features
+    assert (f.version, f.failureHandling, f.readContext) == (1, 1, 1)
+    assert (f.readWorld, f.writeWorld, f.sectionCount, f.descriptorSize) == (read_world, write_world, 122, 16)
+    packager = scans['B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ']
+    assert f.packager == struct.unpack_from('<i', image, packager + 1 - base)[0]
+    sections = scans[next(p for p in scans if p.startswith('? ? ? ? 00 00 00 00 20 74'))]
+    descriptors = image[sections - base:sections - base + 123 * 16]
+    assert descriptors[-16:] == bytes(16)
+    entries = list(struct.iter_unpack('<IIIHH', descriptors[:-16]))
+    assert all(address and size and skip == 0 for address, skip, size, _, _ in entries)
+    assert f.sections == sections
+    return {'file': str(path), 'sha256': hashlib.sha256(raw).hexdigest(),
+            'uniqueScans': len(scans), 'hooks': len(hooks), 'nativeSections': len(entries),
+            'readWorld': hex(read_world), 'writeWorld': hex(write_world),
+            'fileNameGetter': hex(g.binding.resourceFileName),
+            'loadCall': hex(g.call), 'loadCleanup': hex(g.cleanup)}
 
 
-if __name__=='__main__':
-    p=argparse.ArgumentParser()
-    p.add_argument('--reference',type=Path,required=True)
-    p.add_argument('--variant',choices=['SHC','Extreme'],required=True)
-    p.add_argument('--output',type=Path,required=True)
-    a=p.parse_args()
-    result=check(a.reference,a.variant)
-    a.output.parent.mkdir(parents=True,exist_ok=True)
-    a.output.write_text(json.dumps(result,indent=2)+'\n')
-    print(json.dumps(result,indent=2))
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('executables', type=Path, nargs='+')
+    parser.add_argument('--output', type=Path)
+    args = parser.parse_args()
+    results = [check(path) for path in args.executables]
+    text = json.dumps(results, indent=2)
+    if args.output:
+        args.output.write_text(text + '\n')
+    print(text)

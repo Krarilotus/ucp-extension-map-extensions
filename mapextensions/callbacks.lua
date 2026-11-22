@@ -8,10 +8,61 @@ local memory = require("mapextensions.memory")
 local game = require("mapextensions.game")
 local registry = require("mapextensions.registry").registry
 local handles = require("mapextensions.handles")
-local required = require('mapextensions.required')
+local required = require("mapextensions.required")
+
+local WRITE_CHUNK = 4096
+
+local function readSections(data, read)
+  local zip = luamemzip:MemoryZip(data, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'r')
+  local ok, reason = xpcall(read, debug.traceback, zip)
+  zip:close()
+  if not ok then error(reason, 0) end
+end
+
+-- The normal writer and Recorder both use the same ZIP, names and manifest.
+-- Capture callbacks let providers avoid the side effects of a manual save.
+local function serializeSections(capture)
+  local zipHandle = luamemzip:MemoryZip(nil, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'w')
+  local ok, data, length = xpcall(function()
+    for _, extensionName in ipairs(required.names()) do
+      local section = registry[extensionName]
+      local write = required.serializer(extensionName, capture)
+      write(section, handles.createWriteHandle(zipHandle, extensionName))
+    end
+    handles.createWriteHandle(zipHandle, 'framework'):put(required.path, required.manifest())
+    return zipHandle:serialize()
+  end, debug.traceback)
+  zipHandle:close()
+  assert(ok, data)
+  assert(type(data) == 'string' and #data == length and length > 0, 'could not serialize zip')
+  assert(length <= constants.CUSTOM_SECTION_SIZE, 'data too long to store in file: ' .. length)
+  return data
+end
+
+--- Keep a copy of the custom section for debugging. A failure here must not stop
+--- the save or load itself.
+local function writeDebugCopy(path, data)
+  local f, err = io.open(path, 'wb')
+  if f == nil then
+    log(WARNING, string.format("could not write debug copy %s: %s", path, tostring(err)))
+    return
+  end
+  f:write(data)
+  f:close()
+end
 
 --- The interface from the low level game logic to the higher level
 local callbacks = {
+
+  missingOwner = required.missingOwner,
+
+  admit = function(data, context)
+    if data then readSections(data, function(zip) required.admit(zip, context) end) end
+  end,
+
+  captureSections = function()
+    return serializeSections(true)
+  end,
 
   beforeReadSav = function()
     log(VERBOSE, "before read sav")
@@ -39,13 +90,15 @@ local callbacks = {
     game.updateCustomSectionInfoObject(memory.customMapSectionInfoArray, memory.customSectionInfoObject)
   end,
   
+  ---@param context table {kind='map'} or {kind='save'}: the file being loaded
   afterReadSav = function(context)
     log(VERBOSE, "after read sav")
 
     if memory.customSectionInfoObject.size <= 0 then
       log(DEBUG, "afterReadSav(): no custom section present")
-      log(DEBUG, "running initialization callbacks:")
+      -- Modules may still refuse a save that should have had their data.
       required.validateEmpty(context)
+      log(DEBUG, "running initialization callbacks:")
       for _, extensionName in ipairs(required.names()) do
         local callbacks = registry[extensionName]
         if callbacks.initialize ~= nil then
@@ -58,64 +111,44 @@ local callbacks = {
     -- At this point, readSav has processed (decompressed) all sections, including the custom section
     local data = core.readString(memory.customSectionAddress, memory.customSectionInfoObject.size)
 
-    local f, err = io.open("ucp/.cache/sav-custom-section-on-read.zip", 'wb')
-    if f == nil then error(err) end
-    f:write(data)
-    f:close()
+    writeDebugCopy("ucp/.cache/sav-custom-section-on-read.zip", data)
 
-    local zipHandle = luamemzip:MemoryZip(data, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'r')
-
-    local ok, reason = xpcall(function()
-      required.validate(zipHandle, context)
+    readSections(data, function(zipHandle)
+      -- All modules check their data first; only then does any of them restore it.
+      local schemas = required.validate(zipHandle, context)
       for _, extensionName in ipairs(required.names()) do
         local handle = handles.createReadHandle(zipHandle, extensionName)
         handle.loadKind = context and context.kind
+        handle.required = schemas[extensionName] ~= nil
+        handle.schema = schemas[extensionName]
         if required.initializesOnMap(extensionName, context) then
           registry[extensionName]:initialize(context)
         else
           registry[extensionName]:deserialize(handle)
         end
       end
-    end, debug.traceback)
-    zipHandle:close()
-    assert(ok, reason)
+    end)
     
   end,
   
   beforeWriteSav = function()
     log(VERBOSE, "before write sav")
     
-    local zipHandle = luamemzip:MemoryZip(nil, constants.CUSTOM_SECTION_ZIP_COMPRESSION, 'w')
-
-    local data, length
-    local ok, reason = xpcall(function()
-      for _, extensionName in ipairs(required.names()) do
-        registry[extensionName]:serialize(handles.createWriteHandle(zipHandle, extensionName))
-      end
-      handles.createWriteHandle(zipHandle, 'framework'):put(required.path, required.manifest())
-      data, length = zipHandle:serialize()
-    end, debug.traceback)
-    zipHandle:close()
-    assert(ok, reason)
-
-    if data == nil or data == false then
-      error("could not serialize zip")
-    end
-
-    if length > constants.CUSTOM_SECTION_SIZE then
-      error(string.format("data too long to store in file: %s", length))
-    end
+    local data = serializeSections(false)
+    local length = #data
 
     memory.customSectionInfoObject.size = length
     -- The size of the custom section is updated in memory to make the process quicker (not process 100MB)
     game.updateCustomSectionInfoObject(memory.customMapSectionInfoArray, memory.customSectionInfoObject)
 
-    core.writeBytes(memory.customSectionAddress, table.pack(string.byte(data, 1, length)))    
+    -- string.byte returns one value per byte, and Lua limits how many values one call
+    -- may return (about a million), so one call fails for larger data. Write in pieces.
+    for first = 1, length, WRITE_CHUNK do
+      local last = math.min(first + WRITE_CHUNK - 1, length)
+      core.writeBytes(memory.customSectionAddress + first - 1, {string.byte(data, first, last)})
+    end
 
-    local f, err = io.open("ucp/.cache/sav-custom-section-on-write.zip", 'wb')
-    if f == nil then error(err) end
-    f:write(data)
-    f:close()
+    writeDebugCopy("ucp/.cache/sav-custom-section-on-write.zip", data)
 
   end,
   

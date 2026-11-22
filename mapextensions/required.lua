@@ -1,8 +1,23 @@
+-- Sections a module marks as required: the save records which modules wrote them,
+-- and loading checks all of them before any module restores its data.
 local handles = require('mapextensions.handles')
 local registry = require('mapextensions.registry').registry
 local M = {providers = {}, path = 'required-state.yml'}
 local MAX_PROVIDERS, MAX_MANIFEST = 256, 131072
 local MAX_CAPTURE_BYTES = require('mapextensions.constants').CUSTOM_SECTION_SIZE
+local missingOwner = {}
+
+function M.missingOwner(reason)
+  if type(reason) == 'table' and reason.kind == missingOwner then return reason.name, reason.version end
+end
+
+local function validSchema(schema)
+  return type(schema) == 'number' and schema >= 1 and schema <= 65535 and schema == math.floor(schema)
+end
+
+local function validVersion(value)
+  return type(value) == 'string' and #value <= 64 and value:match('^[%w.+-]+$')
+end
 
 local function names()
   local result = {}
@@ -11,40 +26,65 @@ local function names()
   return result
 end
 
+-- A module may say it has nothing to keep right now (isRequired returns false).
+-- Its section is then still saved, but the save does not require the module.
 local function active(name)
   local callbacks = registry[name]
   if not callbacks or not M.providers[name] then return false end
   if not callbacks.isRequired then return true end
   local value = callbacks:isRequired()
-  assert(type(value) == 'boolean', 'Required state predicate must return a boolean')
+  assert(type(value) == 'boolean', 'isRequired must return true or false')
   return value
+end
+
+function M.serializer(name, capture)
+  local callbacks = registry[name]
+  if capture and callbacks.capture and (not M.providers[name] or active(name)) then
+    return callbacks.capture
+  end
+  return callbacks.serialize
 end
 
 function M.register(name, callbacks, options)
   if options == nil then return end
+  if type(options) == 'table' and options.required == false and options.fallback == 'vanilla' then
+    return
+  end
   assert(type(options) == 'table' and options.required == true,
-    'State section options require required=true')
+    'Section options need required=true')
   assert(type(name) == 'string' and #name <= 128 and name ~= 'framework'
-    and name:match('^[%w_-]+$'), 'Invalid required state section name')
+    and name:match('^[%w_-]+$'), 'Invalid required section name')
   local count = 0
   for _ in pairs(M.providers) do count = count + 1 end
-  assert(count < MAX_PROVIDERS, 'Too many required state providers')
+  assert(count < MAX_PROVIDERS, 'Too many required sections')
   assert(type(options.format) == 'string' and #options.format > 0 and #options.format <= 128
-    and options.format:match('^[%w_.-]+$'),
-    'Required state sections need a format identifier')
+    and options.format:match('^[%w_.-]+$'), 'Required sections need a format name')
   assert(type(options.fingerprint) == 'string' and #options.fingerprint == 64
-    and options.fingerprint:match('^%x+$'), 'Required state sections need a SHA256 content fingerprint')
-  for _, method in ipairs({'initialize','serialize','deserialize','validate','capture','integrity'}) do
-    assert(type(callbacks[method]) == 'function', 'Required state section needs ' .. method)
+    and options.fingerprint:match('^%x+$'), 'Required sections need a SHA256 fingerprint of the module')
+  -- capture and integrity serve Recorder: a copy of the data and a digest of it.
+  for _, method in ipairs({'initialize', 'serialize', 'deserialize', 'validate', 'capture', 'integrity'}) do
+    assert(type(callbacks[method]) == 'function', 'Required section needs ' .. method)
   end
-  assert(callbacks.isRequired == nil or type(callbacks.isRequired) == 'function', 'Invalid required state predicate')
-  assert((callbacks.observeBoundary==nil and callbacks.boundaryIntegrity==nil)
-    or (type(callbacks.observeBoundary)=='function' and type(callbacks.boundaryIntegrity)=='function'),
-    'Boundary observation needs both callbacks')
+  assert(callbacks.isRequired == nil or type(callbacks.isRequired) == 'function', 'Invalid isRequired')
+  assert((callbacks.observeBoundary == nil and callbacks.boundaryIntegrity == nil)
+    or (type(callbacks.observeBoundary) == 'function' and type(callbacks.boundaryIntegrity) == 'function'),
+    'observeBoundary and boundaryIntegrity go together')
   assert(options.initializeOnMap == nil or type(options.initializeOnMap) == 'boolean',
-    'Invalid map initialization policy')
-  M.providers[name] = {format=options.format, fingerprint=options.fingerprint:lower(),
-    initializeOnMap=options.initializeOnMap == true}
+    'Invalid initializeOnMap')
+  local schema = options.schema or 1
+  assert(validSchema(schema), 'Invalid section schema')
+  assert(options.version == nil or validVersion(options.version), 'Invalid module version')
+  local version = options.version
+  for _, extension in ipairs(allActiveExtensions or {}) do
+    if not version and extension.name == name and validVersion(extension.version) then version = extension.version end
+  end
+  local accepted = {[schema] = true}
+  for _, oldSchema in ipairs(options.acceptedSchemas or {}) do
+    assert(validSchema(oldSchema) and oldSchema < schema, 'Invalid older section schema')
+    accepted[oldSchema] = true
+  end
+  M.providers[name] = {format = options.format, fingerprint = options.fingerprint:lower(),
+    schema = schema, accepted = accepted, version = version, initializeOnMap = options.initializeOnMap == true}
 end
 
 function M.initializesOnMap(name, context)
@@ -52,13 +92,15 @@ function M.initializesOnMap(name, context)
     and M.providers[name].initializeOnMap == true
 end
 
+-- framework/required-state.yml: which modules a save needs, and in which version.
 function M.manifest()
   local lines = {}
   for _, name in ipairs(names()) do
     local provider = M.providers[name]
     if provider and active(name) then
       lines[#lines + 1] = '  - name: "' .. name .. '"\n    format: "' .. provider.format
-        .. '"\n    fingerprint: "' .. provider.fingerprint .. '"\n'
+        .. '"\n    fingerprint: "' .. provider.fingerprint .. '"\n    schema: ' .. provider.schema .. '\n'
+        .. (provider.version and '    moduleVersion: "' .. provider.version .. '"\n' or '')
         .. (provider.initializeOnMap and '    initializeOnMap: true\n' or '')
     end
   end
@@ -66,49 +108,64 @@ function M.manifest()
   return 'version: 1\nproviders:\n' .. table.concat(lines)
 end
 
-function M.validate(zip, context)
+function M.admit(zip, context)
   local handle = handles.createReadHandle(zip, 'framework')
   local seen = {}
   if handle:exists(M.path) then
     local data = handle:get(M.path)
-    assert(type(data) == 'string' and #data <= MAX_MANIFEST, 'Required state manifest is too large')
+    assert(type(data) == 'string' and #data <= MAX_MANIFEST, 'Required state list is too large')
     local saved = yaml.parse(data)
     assert(type(saved) == 'table' and saved.version == 1 and type(saved.providers) == 'table',
-      'Unsupported required state manifest')
+      'Unsupported required state list')
     local count = 0
     for index in pairs(saved.providers) do
-      assert(type(index) == 'number' and index >= 1 and index == math.floor(index), 'Invalid state provider list')
+      assert(type(index) == 'number' and index >= 1 and index == math.floor(index), 'Invalid required state list')
       count = count + 1
     end
-    assert(count == #saved.providers and count <= MAX_PROVIDERS, 'Invalid state provider list')
+    assert(count == #saved.providers and count <= MAX_PROVIDERS, 'Invalid required state list')
     for _, provider in ipairs(saved.providers) do
-      assert(type(provider) == 'table' and type(provider.name) == 'string' and not seen[provider.name],
-        'Invalid or duplicate required state provider')
-      seen[provider.name] = true
+      assert(type(provider) == 'table' and type(provider.name) == 'string' and #provider.name <= 128
+        and provider.name:match('^[%w_-]+$') and not seen[provider.name],
+        'Invalid or duplicate entry in the required state list')
+      local schema = provider.schema or 1
+      assert(validSchema(schema) and type(provider.format) == 'string' and #provider.format <= 128
+        and provider.format:match('^[%w_.-]+$')
+        and (provider.moduleVersion == nil or validVersion(provider.moduleVersion)),
+        'Invalid saved provider version')
+      seen[provider.name] = schema
       local current = M.providers[provider.name]
       assert(provider.initializeOnMap == nil or type(provider.initializeOnMap) == 'boolean',
-        'Invalid saved map initialization policy')
-      -- Renaming a save to .map intentionally makes a new editable scenario.
-      -- Only explicitly opted-in state can lose its saved-match requirements.
+        'Invalid saved initializeOnMap')
+      -- A save renamed to .map is a new scenario: sections that asked for it start fresh.
       if not (context and context.kind == 'map' and provider.initializeOnMap == true) then
-        assert(current and registry[provider.name], 'This save requires state provider: ' .. provider.name)
-        assert(current.format == provider.format and current.fingerprint == provider.fingerprint,
-          'This save requires the original state provider content: ' .. provider.name)
+        if not (current and registry[provider.name] and current.format == provider.format
+          and current.accepted[schema]) then
+          error({kind = missingOwner, name = provider.name,
+            version = provider.moduleVersion or provider.format}, 0)
+        end
       end
     end
   end
-  -- Every validator runs before the first extension restore callback.
+  return seen
+end
+
+function M.validate(zip, context)
+  local seen = M.admit(zip, context)
+  -- Every module checks its data before the first one restores anything.
   for _, name in ipairs(names()) do
     local callbacks = registry[name]
     if callbacks.validate and not M.initializesOnMap(name, context) then
       local section = handles.createReadHandle(zip, name)
-      section.required = seen[name] == true
+      section.required = seen[name] ~= nil
+      section.schema = seen[name]
       section.loadKind = context and context.kind
       callbacks:validate(section)
     end
   end
+  return seen
 end
 
+-- For Recorder: copies of the required sections, without saving the game.
 function M.capture()
   local entries = {['framework/' .. M.path] = M.manifest()}
   local count, bytes = 1, #entries['framework/' .. M.path]
@@ -129,9 +186,11 @@ function M.capture()
   return entries
 end
 
+-- A file without any custom section: modules can still refuse it, e.g. a save
+-- made before the module kept its state.
 function M.validateEmpty(context)
-  local empty = {loadKind=context and context.kind,
-    exists=function() return false end, get=function() error('No custom state in this save') end}
+  local empty = {loadKind = context and context.kind,
+    exists = function() return false end, get = function() error('No custom data in this file') end}
   for _, name in ipairs(names()) do
     if registry[name].validate and not M.initializesOnMap(name, context) then
       registry[name]:validate(empty)
@@ -139,6 +198,7 @@ function M.validateEmpty(context)
   end
 end
 
+-- For Recorder: digests to compare a replay with its recording.
 function M.integrity()
   local result = {}
   for _, name in ipairs(names()) do
