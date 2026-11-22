@@ -75,7 +75,8 @@ match continues.
 
 ## Loading
 
-1. On the single-player Load action (solitary and skirmish games) Map Extensions
+1. On the single-player Load action (solitary and skirmish games, including a
+   `.map` opened from Custom Scenarios, which uses the same call) Map Extensions
    checks the list before calling the native world reader. Each required
    provider must accept the format and saved schema. The dialog names the
    missing or incompatible module and saved version (the format identifier for
@@ -91,7 +92,8 @@ match continues.
 
 Everything else keeps the existing fatal path: multiplayer loads (they run inside
 a synchrony command, so one player returning to the menu would leave the others
-loading), the editor, campaign and map starts, which use other reader callers,
+loading), the editor, campaign and skirmish map starts, which use other reader
+callers,
 and any failure after the world reader has started, including a module's own
 `validate(handle)` rejecting its data.
 
