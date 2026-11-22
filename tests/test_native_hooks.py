@@ -68,7 +68,8 @@ def test_missing_owner_requests_menu_and_signals_native_refusal(runtime):
     lua_host(runtime).execute('''
       local status, menus, notices = 1, 0, 0
       package.loaded['mapextensions.loadrefusal']={
-        resolve=function() return 100, 200 end, install=function() return 300 end}
+        resolve=function() return 100, 200, 400 end, install=function() return 300 end,
+        singlePlayer=function(address) local m=core.readInteger(address); return m==0 or m==99 end}
       package.loaded['mapextensions.archiveprobe']={
         resolveDecoder=function() end, read=function() return 'archive' end,
         openGameSave=function(path) assert(path=='test.sav'); return {close=function() return true end} end}
@@ -79,14 +80,22 @@ def test_missing_owner_requests_menu_and_signals_native_refusal(runtime):
         assert(name=='battle'); notices=notices+1
       end
       modules={ui={switchToMenu=function() menus=menus+1 end}}
-      core.readInteger=function(address) return address == 300 and status or 200000 end
-      core.writeInteger=function(address,value) assert(address == 300); status=value end
+      local progress = 0x493690
+      core.readInteger=function(address)
+        if address == 400 then return 99 end -- single-player skirmish
+        return address == 300 and status or 200000
+      end
+      core.writeInteger=function(address,value)
+        if address == 200000 + 0x20 then progress=value; return end
+        assert(address == 300); status=value
+      end
       install({admit=function(bytes)
         assert(bytes=='archive'); error({name='battle',version='1.2.3'},0)
       end,
         missingOwner=function(reason) return reason.name, reason.version end},true)
       assert(hooks[1](200000,sections)==0)
       assert(nativeCalls==0 and menus==1 and notices==1 and status==2 and levels()=='-1')
+      assert(progress==0, 'the reader that clears the progress callback did not run')
       assert(messages[1].text:find('before native read',1,true))
       assert(game.takeLoadRefusal()=='battle' and game.takeLoadRefusal()==nil)
     ''')

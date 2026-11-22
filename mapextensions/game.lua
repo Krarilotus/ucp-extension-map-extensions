@@ -87,10 +87,11 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
   -- read map or sav
   local ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
   local status
-  local probe, decompress
+  local probe, decompress, refusal, gameMode
   if allowRefusal then
-    local refusal = require('mapextensions.loadrefusal')
-    local call, cleanup = refusal.resolve(readWorld, originalMapSectionInfoArray, ptr_FilePackagerObj)
+    refusal = require('mapextensions.loadrefusal')
+    local call, cleanup
+    call, cleanup, gameMode = refusal.resolve(readWorld, originalMapSectionInfoArray, ptr_FilePackagerObj)
     probe = require('mapextensions.archiveprobe')
     decompress = probe.resolveDecoder()
     status = refusal.install(call, cleanup, readWorld)
@@ -103,10 +104,13 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     lastLoadRefusal = nil
     local result
     local started
+    -- Only the single-player Load action can return to the menu before the world
+    -- is read. Every other reader caller, multiplayer included, keeps the fatal path.
+    local early = status ~= nil and core.readInteger(status) == 1 and refusal.singlePlayer(gameMode)
     local ok, reason = xpcall(function()
       if originalMapSectionInfoArray ~= ptrMapSectionAddressArray then error("argument is not what we expected") end
       local context, path = readContext()
-      if status and core.readInteger(status) == 1 then
+      if early then
         local file = probe.openGameSave(path)
         local readable, bytes = pcall(probe.read, file, decompress)
         local closed = file:close()
@@ -128,11 +132,21 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     if not ok then
       local name, version
       if callbacks.missingOwner then name, version = callbacks.missingOwner(reason) end
-      if name and not started and status and core.readInteger(status) == 1 then
-        lastLoadRefusal = name
+      -- Nothing of the world has been read yet: a missing module, or a file whose
+      -- section cannot be read, is refused and the player returns to the menu.
+      if early and not started then
+        lastLoadRefusal = name or 'map-extensions'
         core.writeInteger(status, 2)
-        modules.ui:switchToMenu() -- the UI owner requests the main menu
-        log(WARNING, 'Map Extensions: refused save requiring ' .. name .. ' (' .. version .. ') before native read')
+        -- The native reader clears the packager's progress callback first; it did
+        -- not run, so clear it here as the later skirmish and map loads expect.
+        core.writeInteger(this + 0x20, 0)
+        local switched, switchError = pcall(modules.ui.switchToMenu, modules.ui) -- the UI owner's main menu
+        if not switched then log(ERROR, 'Map Extensions: ' .. tostring(switchError)) end
+        if name then
+          log(WARNING, 'Map Extensions: refused save requiring ' .. name .. ' (' .. version .. ') before native read')
+        else
+          log(WARNING, 'Map Extensions: refused unreadable save before native read: ' .. tostring(reason))
+        end
         local shown, messageError = pcall(require('mapextensions.loadmessage'), name, version)
         if not shown then log(ERROR, tostring(messageError)) end
         return 0
