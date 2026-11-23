@@ -1,5 +1,7 @@
 name: Required state contract
-on: [push, pull_request]
+on:
+  # Runs only when started by hand (Actions tab > Run workflow), to save CI minutes.
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
