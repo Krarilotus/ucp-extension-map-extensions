@@ -41,6 +41,9 @@ local function createReadHandle(memoryZip, prefix)
       log(2, string.format("exists? => %s%s", prefix, path))
       local status, code, message = memoryZip:open_entry(prefix .. path)
       if not status then return false end
+      -- Close it again, as get() does, so no entry stays open.
+      local closed, closeCode, closeMessage = memoryZip:close_entry()
+      if not closed then error(string.format('Cannot close entry: %s %s', tostring(closeCode), tostring(closeMessage))) end
       return true
     end,
     

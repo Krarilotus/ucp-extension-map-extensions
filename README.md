@@ -1,6 +1,41 @@
 # UCP Extension: map-extensions
 UCP Extension that enables storing extra information in .map and .sav files
 
+Version 1.2.0 keeps saves loadable. Sections are optional by default: a save
+made with a module that is now missing still loads, and that module's part plays
+like the unmodded game. A module whose missing data could break the match marks
+its section required; such a save is refused at the single-player Load action
+before the world is read, a translated dialog names the module and version, and
+the game returns to the main menu. Multiplayer loads keep the fatal path. Map Extensions admits saves by their saved format and schema, not
+by a fingerprint of the module's files, so a module update or a settings change
+alone does not make it refuse a save; a module's own checks can be stricter. Recorder gets the complete save archive for its
+replay restore points. Modules declare `save-state` in their definition for the
+launcher. Loading a multiplayer save made with a different set of modules,
+versions or settings is not advised. See [docs/required-state.md](docs/required-state.md).
+
+The 1.1.x notes below describe test builds that were not published in the
+Store. 1.2.0 replaces their fatal dialog at the Load action with the refusal above.
+
+Version 1.1.3 stops native save/load operations when a callback fails. It uses
+UCP's existing fatal logger so a rejected required-state restore cannot leave a
+running world with missing extension state. This covers section sizing,
+initialization, validation, restoration and serialization at the existing hooks;
+successful calls, scans and section formats are unchanged. The required-state API
+still raises catchable errors when called directly for Recorder preflight.
+The dialog gives the reason and restart instruction; the error log retains the
+full stack trace. This replaces the verbose dialog in the 1.1.2 test build.
+
+Version 1.1.4 supplies native file context to state callbacks. A new `.map` can
+contain a nonzero editor tick, so providers must use `context.kind` or
+`handle.loadKind` to distinguish map initialization from save restoration.
+The existing native reader supplies this context; no additional scan or hook is
+installed. Recorder shares its filename binding through the native save API.
+
+Version 1.1.6 keeps that dialog reason short in the game. The framework names
+module chunks `@<path>`, so each rethrown `assert` prefixed the reason with a
+`file.lua:line:` position that 1.1.3 did not remove. These are now removed as well;
+the error log still holds the full message and stack trace.
+
 ## Idea
 A .map file has sections. How to read these sections and where to store the data is stored in the .exe file.
 Currently that array is 123 entries long (.msv files use all of those). It cannot be expanded.
