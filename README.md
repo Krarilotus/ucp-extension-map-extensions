@@ -1,18 +1,8 @@
 # UCP Extension: map-extensions
 UCP Extension that enables storing extra information in .map and .sav files
 
-Version 1.2.0 keeps saves loadable. Sections are optional by default: a save
-made with a module that is now missing still loads, and that module's part plays
-like the unmodded game. A module whose missing data could break the match marks
-its section required; such a save is refused at the single-player Load action
-before the world is read, a translated dialog names the module and version, and
-the game returns to the main menu. Multiplayer loads keep the fatal path. Map Extensions admits saves by their saved format and schema, not
-by a fingerprint of the module's files, so a module update or a settings change
-alone does not make it refuse a save; a module's own checks can be stricter. Recorder gets the complete save archive for its
-replay restore points. Modules declare `save-state` in their definition for the
-launcher. Loading a multiplayer save made with a different set of modules,
-versions or settings is not advised. See [docs/required-state.md](docs/required-state.md).
-Run the tests with `python -m pytest tests` (needs `pytest`, `lupa` and `pyyaml`).
+Sections are optional by default: a save made with a module that is now missing still loads.
+A module can mark its section required; see [docs/required-state.md](docs/required-state.md).
 
 ## Idea
 A .map file has sections. How to read these sections and where to store the data is stored in the .exe file.
