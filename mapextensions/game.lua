@@ -186,7 +186,9 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
   -- end, core.AOBScan("53 55 56 8B F1 57 33 FF 89 ? ? ? ? ? 89 ? ? ? ? ? 89 ? ? ? ? ? 89 ? ? ? ? ? E8 ? ? ? ?"), 5)
 
 
-  core.detourCode(function(registers)
+  -- The site lies between the native "cmp [esi+0x28], ebx" and its "jle"; the callback runs
+  -- between pushfd and popfd so that the jump reads the game's compare.
+  local afterReadDirectory = utils.createLuaFunctionWrapper(function(registers)
     local ok, reason = xpcall(function()
 
     local directoryDataAddress = ptr_FilePackagerObj + 36
@@ -225,7 +227,9 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     end, debug.traceback)
     if not ok then stopLoading(reason) end
     return registers
-  end, core.AOBScan("89 5E 24 89 54 24 20"), 7)
+  end)
+  core.insertCode(core.AOBScan("89 5E 24 89 54 24 20"), 7,
+    { 0x9C, core.callTo(afterReadDirectory), 0x9D }, nil, "after")
 
   nativeSaveInterface = {
     version = 1,
