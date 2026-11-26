@@ -69,7 +69,8 @@ function SerializationCallbacks:deserialize(handle) end
 function SerializationCallbacks:validate(handle) end
 
 ---Put the same data as serialize without changing anything; Recorder uses it. Required
----sections need it. Without it, Recorder's captures call serialize.
+---sections need it. Without it, Recorder's captures call serialize, so a provider
+---relying on that must keep serialize read-only.
 ---@param handle WriteHandle the handle to serialize data
 ---@return void
 function SerializationCallbacks:capture(handle) end

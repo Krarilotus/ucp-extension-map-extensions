@@ -17,6 +17,12 @@ local api = {}
 api = {
 
   enable = function(self, config)
+    local resolved, problem = pcall(game.resolve)
+    if not resolved then
+      log(WARNING, 'Map Extensions: saving and loading extension data is off: ' .. tostring(problem))
+      return
+    end
+
     game.enlargeMemoryAllocation(constants.MAP_MEMORY_SIZE)
 
     memory.initialize()

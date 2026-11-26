@@ -1,10 +1,13 @@
 local helpers = require('mapextensions.helpers')
 
-local originalMapSectionInfoArray = core.AOBScan("? ? ? ? 00 00 00 00 20 74 02 00 01 00 e9 03 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 09 04 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 ea 03 ? ? ? ? 00 00 00 00 40 e8 04 00 01 00 eb 03")
-
+-- Game sites that saving and loading extension data need, set by resolve().
+local originalMapSectionInfoArray
 -- The game's functions that read and write a whole .map/.sav file.
-local readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
-local writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
+local readWorld, writeWorld
+local ptr_codeReadSavMallocSize, ptr_codeWriteSavMallocSize
+local ptr_FilePackagerObj
+local filenameBinding, readContext
+local ptr_afterReadDirectory
 
 local nativeSaveInterface
 local lastLoadRefusal
@@ -15,13 +18,25 @@ local function expect(address, pattern, what)
   end
 end
 
-local function enlargeMemoryAllocation(memorySize)
+-- Raises if a site is missing; nothing has been written to the game at that point.
+local function resolve()
+  originalMapSectionInfoArray = core.AOBScan("? ? ? ? 00 00 00 00 20 74 02 00 01 00 e9 03 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 09 04 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 ea 03 ? ? ? ? 00 00 00 00 40 e8 04 00 01 00 eb 03")
+  readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
+  writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
+
   -- Both functions start by allocating their file buffer: push <size>; ...
-  local ptr_codeReadSavMallocSize = readWorld + 0x0C
-  local ptr_codeWriteSavMallocSize = writeWorld + 0x13
+  ptr_codeReadSavMallocSize = readWorld + 0x0C
+  ptr_codeWriteSavMallocSize = writeWorld + 0x13
   expect(ptr_codeReadSavMallocSize, "68 ? ? ? ? 89 44 24 14", "read buffer size")
   expect(ptr_codeWriteSavMallocSize, "68 ? ? ? ? 89 44 24 1C", "write buffer size")
 
+  ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
+  -- Which file is being read: modules start fresh on a .map and restore on a .sav.
+  filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
+  ptr_afterReadDirectory = core.AOBScan("89 5E 24 89 54 24 20")
+end
+
+local function enlargeMemoryAllocation(memorySize)
   core.writeCodeInteger(ptr_codeReadSavMallocSize + 1, memorySize)
   core.writeCodeInteger(ptr_codeWriteSavMallocSize + 1, memorySize)
 end
@@ -81,9 +96,6 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
 
   -- Hooks
   -- read map or sav
-  local ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
-  -- Which file is being read: modules start fresh on a .map and restore on a .sav.
-  local filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
 
   -- Refusing a save before the world is read is optional: without its game sites,
   -- loading keeps the fatal path.
@@ -231,7 +243,7 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     if not ok then stopLoading(reason) end
     return registers
   end)
-  core.insertCode(core.AOBScan("89 5E 24 89 54 24 20"), 7,
+  core.insertCode(ptr_afterReadDirectory, 7,
     { 0x9C, core.callTo(afterReadDirectory), 0x9D }, nil, "after")
 
   nativeSaveInterface = {
@@ -267,6 +279,7 @@ local function getNativeSaveInterface()
 end
 
 return {
+  resolve = resolve,
   enlargeMemoryAllocation = enlargeMemoryAllocation,
   createCustomSectionInfoArray = createCustomSectionInfoArray,
   updateCustomSectionInfoObject = updateCustomSectionInfoObject,
