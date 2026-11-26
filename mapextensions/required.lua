@@ -79,8 +79,6 @@ function M.register(name, callbacks, options)
   assert(count < MAX_PROVIDERS, 'Too many required sections')
   assert(type(options.format) == 'string' and #options.format > 0 and #options.format <= 128
     and options.format:match('^[%w_.-]+$'), 'Required sections need a format name')
-  assert(type(options.fingerprint) == 'string' and #options.fingerprint == 64
-    and options.fingerprint:match('^%x+$'), 'Required sections need a SHA256 fingerprint of the module')
   -- capture and integrity serve Recorder: a copy of the data and a digest of it.
   for _, method in ipairs({'initialize', 'serialize', 'deserialize', 'validate', 'capture', 'integrity'}) do
     assert(type(callbacks[method]) == 'function', 'Required section needs ' .. method)
@@ -103,8 +101,8 @@ function M.register(name, callbacks, options)
     assert(validSchema(oldSchema) and oldSchema < schema, 'Invalid older section schema')
     accepted[oldSchema] = true
   end
-  M.providers[name] = {format = options.format, fingerprint = options.fingerprint:lower(),
-    schema = schema, accepted = accepted, version = version, initializeOnMap = options.initializeOnMap == true}
+  M.providers[name] = {format = options.format, schema = schema, accepted = accepted, version = version,
+    initializeOnMap = options.initializeOnMap == true}
 end
 
 function M.initializesOnMap(name, context)
@@ -119,7 +117,7 @@ function M.manifest()
     local provider = M.providers[name]
     if provider and active(name) then
       lines[#lines + 1] = '  - name: "' .. name .. '"\n    format: "' .. provider.format
-        .. '"\n    fingerprint: "' .. provider.fingerprint .. '"\n    schema: ' .. provider.schema .. '\n'
+        .. '"\n    schema: ' .. provider.schema .. '\n'
         .. (provider.version and '    moduleVersion: "' .. provider.version .. '"\n' or '')
         .. (provider.initializeOnMap and '    initializeOnMap: true\n' or '')
     end
@@ -227,7 +225,7 @@ function M.integrity()
       local value = registry[name]:integrity()
       assert(type(value) == 'string' and #value > 0 and #value <= 256 and value:match('^[%w_.-]+$'),
         'Invalid state integrity digest: ' .. name)
-      result[name] = {format=provider.format, fingerprint=provider.fingerprint, digest=value}
+      result[name] = {format=provider.format, digest=value}
     end
   end
   return result
@@ -236,7 +234,7 @@ end
 function M.contracts()
   local result = {}
   for name, provider in pairs(M.providers) do
-    if active(name) then result[name] = {format=provider.format, fingerprint=provider.fingerprint} end
+    if active(name) then result[name] = {format=provider.format} end
   end
   return result
 end
@@ -249,7 +247,7 @@ function M.observeBoundary()
   for _,name in ipairs(names()) do
     if active(name) then
       local callbacks,provider=registry[name],M.providers[name]
-      local value={format=provider.format,fingerprint=provider.fingerprint}
+      local value={format=provider.format}
       if callbacks.observeBoundary then
         callbacks:observeBoundary()
         value.capture=function() return callbacks:boundaryIntegrity() end
@@ -267,7 +265,7 @@ function M.boundaryIntegrity()
     local digest=value.capture and value.capture() or value.digest
     assert(type(digest)=='string' and #digest>0 and #digest<=256 and digest:match('^[%w_.-]+$'),
       'Invalid observed state digest: '..name)
-    result[name]={format=value.format,fingerprint=value.fingerprint,digest=digest}
+    result[name]={format=value.format,digest=digest}
   end
   return result
 end

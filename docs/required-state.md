@@ -14,13 +14,12 @@ modules['map-extensions']:registerSection('my-module', callbacks, {
   format = 'my-module-state',    -- stable format identifier
   schema = 2,                    -- schema written by this version
   acceptedSchemas = {1},         -- schemas the callbacks know how to migrate
-  fingerprint = moduleSha256,    -- SHA256 for replay compatibility and diagnostics
   initializeOnMap = true,         -- optional, see "Maps" below
 })
 ```
 
 Without the third argument nothing changes: `registerSection(name, callbacks)` works
-as before.
+as before. A `fingerprint` field from older registrations is ignored.
 
 A module can declare the optional policy explicitly with
 `{required = false, fallback = 'vanilla'}`. Use it only when the native world
@@ -64,7 +63,7 @@ save-state: required   # saves can need this module
 ## Saving
 
 Each save gets a list, `framework/required-state.yml`, with the required
-providers, formats, schemas, and fingerprints. The module version comes from
+providers, formats and schemas. The module version comes from
 the active load order when the section and module names match. A differently
 named provider can pass its package version in the registration's `version`.
 Old entries that lack a schema are read as schema 1.
@@ -81,8 +80,7 @@ match continues.
    provider must accept the format and saved schema. The dialog names the
    missing or incompatible module and saved version (the format identifier for
    older saves) and returns to the main menu. A file whose section cannot be
-   read is refused the same way with a general message. A code fingerprint
-   change alone does not reject a normal save.
+   read is refused the same way with a general message.
 2. Every module's `validate(handle)` runs. It should check its data and raise an error
    if the data is missing or cannot be used. `handle.loadKind` is `'map'` or `'save'`;
    `handle.required` tells whether the saved list named this module.
@@ -133,8 +131,8 @@ the game. It uses:
   must check this before attempting a second world read.
 
 - `captureRequiredSections()`: copies of the list and of every required section;
-- `requiredStateIntegrity()` and `requiredStateContracts()`: each module's digest,
-  `format` and `fingerprint`;
+- `requiredStateIntegrity()` and `requiredStateContracts()`: each module's digest
+  and `format`;
 - `observeRequiredStateBoundary()` and `requiredStateBoundaryIntegrity()`: the
   digests at one moment, kept until asked for. A module may supply
   `observeBoundary()` and `boundaryIntegrity()` to copy first and hash later;
