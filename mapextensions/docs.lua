@@ -26,6 +26,7 @@ function WriteHandle.put(self, path , data ) end
 ---@class ReadHandle
 ---@field loadKind 'map'|'save'|nil Which kind of file is being loaded
 ---@field required boolean|nil For validate(): whether the save's list of required modules names this one
+---@field schema number|nil For validate() and deserialize(): the saved schema of a required section
 local ReadHandle = {}
 
 ---Get data from the .sav file
@@ -60,11 +61,18 @@ function SerializationCallbacks:serialize(handle) end
 ---@return void
 function SerializationCallbacks:deserialize(handle) end
 
----Required sections only: check the saved data before anything is restored. Raise an
----error with a short, readable first line if it is missing or cannot be used.
+---Required sections need it, others may have it: check the saved data before anything is
+---restored, also for a file without any data of this module. Raise an error with a short,
+---readable first line if the data is missing or cannot be used.
 ---@param handle ReadHandle the handle to the saved data
 ---@return void
 function SerializationCallbacks:validate(handle) end
+
+---Put the same data as serialize without changing anything; Recorder uses it. Required
+---sections need it. Without it, Recorder's captures call serialize.
+---@param handle WriteHandle the handle to serialize data
+---@return void
+function SerializationCallbacks:capture(handle) end
 
 ---Optional, required sections only: return false while there is nothing to keep, so the
 ---save does not require this module.

@@ -21,7 +21,7 @@ api = {
 
     memory.initialize()
 
-    game.registerReadWriteSavHooks(memory.customMapSectionInfoArray, constants.CUSTOM_SECTION_ID, callbacks, true)
+    game.registerReadWriteSavHooks(memory.customMapSectionInfoArray, constants.CUSTOM_SECTION_ID, callbacks)
 
   end,
 

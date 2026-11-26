@@ -1,5 +1,3 @@
--- Draft translations need review by native speakers. The `unreadable` texts
--- are machine translations (Claude Opus 5.5) pending that review.
 local messages = {
   english = 'This save requires the module "%s" (%s). Enable the compatible version and try again.',
   german = 'Dieser Spielstand benötigt das Modul „%s“ (%s). Aktiviere eine kompatible Version und versuche es erneut.',
@@ -24,9 +22,10 @@ local unreadable = {
   persian = 'این ذخیره خوانده نشد.',
 }
 
+-- Framework 3.0.7 names only the seven languages of the original release; the
+-- other editions show English there.
 local function language()
-  local texts = modules.textResourceModifier
-  local name = texts and texts.GetLanguage and texts:GetLanguage() or data.version.getGameLanguage()
+  local name = data.version.getGameLanguage()
   return type(name) == 'string' and name:lower()
 end
 

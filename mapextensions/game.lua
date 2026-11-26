@@ -10,12 +10,8 @@ local nativeSaveInterface
 local lastLoadRefusal
 
 local function expect(address, pattern, what)
-  local offset = 0
-  for token in pattern:gmatch('%S+') do
-    if token ~= '?' and core.readByte(address + offset) ~= tonumber(token, 16) then
-      error(string.format('Map Extensions does not recognise this game version (%s)', what))
-    end
-    offset = offset + 1
+  if not helpers.matchesAOB(pattern, address) then
+    error(string.format('Map Extensions does not recognise this game version (%s)', what))
   end
 end
 
@@ -80,24 +76,31 @@ local function refuseSaving(result)
   return 0
 end
 
-local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks, allowRefusal)
+local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks)
   assert(nativeSaveInterface == nil, 'Map Extensions save hooks are already installed')
 
   -- Hooks
   -- read map or sav
   local ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
+  -- Which file is being read: modules start fresh on a .map and restore on a .sav.
+  local filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
+
+  -- Refusing a save before the world is read is optional: without its game sites,
+  -- loading keeps the fatal path.
   local status
   local probe, decompress, refusal, gameMode
-  if allowRefusal then
+  local call, cleanup
+  local resolved, unsupported = pcall(function()
     refusal = require('mapextensions.loadrefusal')
-    local call, cleanup
     call, cleanup, gameMode = refusal.resolve(readWorld, originalMapSectionInfoArray, ptr_FilePackagerObj)
     probe = require('mapextensions.archiveprobe')
     decompress = probe.resolveDecoder()
+  end)
+  if resolved then
     status = refusal.install(call, cleanup, readWorld)
+  else
+    log(WARNING, 'Map Extensions: refusing saves before loading is off: ' .. shortReason(unsupported))
   end
-  -- Which file is being read: modules start fresh on a .map and restore on a .sav.
-  local filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
 
   local originalReadSav
   originalReadSav = core.hookCode(function(this, ptrMapSectionAddressArray)

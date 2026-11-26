@@ -93,9 +93,9 @@ match continues.
 Everything else keeps the existing fatal path: multiplayer loads (they run inside
 a synchrony command, so one player returning to the menu would leave the others
 loading), the editor, campaign and skirmish map starts, which use other reader
-callers,
-and any failure after the world reader has started, including a module's own
-`validate(handle)` rejecting its data.
+callers, and any failure after the world reader has started, including a module's own
+`validate(handle)` rejecting its data. On a game whose Load action Map Extensions does
+not recognise, step 1 is off (a warning in the log) and every load takes this path.
 
 Callbacks receive `{kind='map'}` or `{kind='save'}`: `initialize(context)`, and
 `loadKind` on the handles. A file is a map when its name ends in `.map`. Do not use
@@ -129,7 +129,8 @@ the game. It uses:
   `capture(handle)` when ordinary `serialize(handle)` has side effects. A
   provider returning state from either callback must produce compatible bytes.
 - `takeLoadRefusal()`: consumes the refused provider name after the native
-  Load action. A caller must check this before attempting a second world read.
+  Load action, or `map-extensions` when the file could not be read. A caller
+  must check this before attempting a second world read.
 
 - `captureRequiredSections()`: copies of the list and of every required section;
 - `requiredStateIntegrity()` and `requiredStateContracts()`: each module's digest,

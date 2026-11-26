@@ -59,7 +59,7 @@ end
 
 function M.serializer(name, capture)
   local callbacks = registry[name]
-  if capture and callbacks.capture and (not M.providers[name] or active(name)) then
+  if capture and callbacks.capture then
     return callbacks.capture
   end
   return callbacks.serialize

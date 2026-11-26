@@ -1,16 +1,12 @@
 -- Which file is being loaded. readWorld asks the game for the file name at +0x44;
 -- the called function is found there and checked byte by byte, so no extra scan is needed.
+local matchesAOB = require('mapextensions.helpers').matchesAOB
 local M = {}
 local caller = '55 57 B9 ? ? ? ? E8 ? ? ? ? 53 68 00 80 00 00 50 E8 ? ? ? ? 8B F8 83 CD FF 83 C4 0C 3B FD'
 local filename = '8B 81 C4 0B 00 00 69 C0 E9 03 00 00 8D 84 08 E0 AE 07 00 C3'
 
 local function verify(address, pattern)
-  local offset = 0
-  for token in pattern:gmatch('%S+') do
-    assert(token == '?' or core.readByte(address + offset) == tonumber(token, 16),
-      'Map Extensions does not recognise this game version (file name lookup)')
-    offset = offset + 1
-  end
+  assert(matchesAOB(pattern, address), 'Map Extensions does not recognise this game version (file name lookup)')
 end
 
 function M.resolve(readWorld)

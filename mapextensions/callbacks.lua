@@ -39,18 +39,6 @@ local function serializeSections(capture)
   return data
 end
 
---- Keep a copy of the custom section for debugging. A failure here must not stop
---- the save or load itself.
-local function writeDebugCopy(path, data)
-  local f, err = io.open(path, 'wb')
-  if f == nil then
-    log(WARNING, string.format("could not write debug copy %s: %s", path, tostring(err)))
-    return
-  end
-  f:write(data)
-  f:close()
-end
-
 --- The interface from the low level game logic to the higher level
 local callbacks = {
 
@@ -111,8 +99,6 @@ local callbacks = {
     -- At this point, readSav has processed (decompressed) all sections, including the custom section
     local data = core.readString(memory.customSectionAddress, memory.customSectionInfoObject.size)
 
-    writeDebugCopy("ucp/.cache/sav-custom-section-on-read.zip", data)
-
     readSections(data, function(zipHandle)
       -- All modules check their data first; only then does any of them restore it.
       local schemas = required.validate(zipHandle, context)
@@ -147,8 +133,6 @@ local callbacks = {
       local last = math.min(first + WRITE_CHUNK - 1, length)
       core.writeBytes(memory.customSectionAddress + first - 1, {string.byte(data, first, last)})
     end
-
-    writeDebugCopy("ucp/.cache/sav-custom-section-on-write.zip", data)
 
   end,
   
