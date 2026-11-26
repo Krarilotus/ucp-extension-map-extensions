@@ -54,6 +54,8 @@ local callbacks = {
 
   beforeReadSav = function()
     log(VERBOSE, "before read sav")
+    -- Only the directory read sets the size; a file the game cannot open has none.
+    memory.customSectionInfoObject.size = 0
 
     -- wipe it! Maybe not necessary because zip procedure simply stops reading?
     -- core.setMemory(customSectionAddress, 0, CUSTOM_SECTION_SIZE)

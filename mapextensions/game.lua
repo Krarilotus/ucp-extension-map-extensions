@@ -155,7 +155,12 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
         -- The native reader clears the packager's progress callback first; it did
         -- not run, so clear it here as the later skirmish and map loads expect.
         core.writeInteger(this + 0x20, 0)
-        local switched, switchError = pcall(modules.ui.switchToMenu, modules.ui) -- the UI owner's main menu
+        -- The UI owner's main menu. The progress box runs this Load every frame until
+        -- it closes; the native load closes it after the read, so close it here too.
+        local switched, switchError = pcall(function()
+          modules.ui:switchToMenu()
+          modules.ui:activateModalMenu(-1, 1)
+        end)
         if not switched then log(ERROR, 'Map Extensions: ' .. tostring(switchError)) end
         if name then
           log(WARNING, 'Map Extensions: refused save requiring ' .. name .. ' (' .. version .. ') before native read')
