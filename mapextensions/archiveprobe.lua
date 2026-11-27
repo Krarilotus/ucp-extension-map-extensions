@@ -90,7 +90,8 @@ end
 
 function M.resolveDecoder()
   local pattern = '83 EC 34 53 56 68 D8 8D 00 00 6A 42 BB 01 00 00 00 FF 15 ? ? ? ? 8B F0 85 F6 75 08 5E 5B 83 C4 34 C2 14 00 57 56 FF 15 ? ? ? ? 8B F8 85 FF 75 12'
-  local address = core.AOBScan(pattern)
+  local address, reason = core.AOBScanUnique(pattern)
+  if not address then error("save decompressor: " .. reason, 0) end
   local explode = core.exposeCode(address, 6, CallingConvention.THISCALL)
   return function(data, size)
     assert(#data >= 12, 'Short compressed Map Extensions section')

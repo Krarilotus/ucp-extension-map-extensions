@@ -4,7 +4,7 @@ version: 1.2.1
 author: gynt
 display-name: Map Extensions
 dependencies:
-  framework: ^3.0.7
+  framework: ^3.0.8
   ui: ^1.0.1
   cffi: ^1.0.0
 tags:

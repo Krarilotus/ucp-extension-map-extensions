@@ -13,7 +13,7 @@ local nativeSaveInterface
 local lastLoadRefusal
 
 local function expect(address, pattern, what)
-  if not helpers.matchesAOB(pattern, address) then
+  if not core.matchesAOB(pattern, address) then
     error(string.format('Map Extensions does not recognise this game version (%s)', what))
   end
 end
@@ -107,11 +107,10 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     call, cleanup, gameMode = refusal.resolve(readWorld, originalMapSectionInfoArray, ptr_FilePackagerObj)
     probe = require('mapextensions.archiveprobe')
     decompress = probe.resolveDecoder()
-  end)
-  if resolved then
     status = refusal.install(call, cleanup, readWorld)
-  else
-    log(WARNING, 'Map Extensions: refusing saves before loading is off: ' .. shortReason(unsupported))
+  end)
+  if not resolved then
+    log(ERROR, 'Map Extensions: refusing saves before loading is off: ' .. shortReason(unsupported))
   end
 
   local originalReadSav

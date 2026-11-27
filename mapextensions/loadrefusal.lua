@@ -2,22 +2,29 @@
 -- match. Reject through that caller's own epilogue before match preparation.
 local M = {}
 
+local function unique(pattern, name)
+  local address, reason = core.AOBScanUnique(pattern)
+  if not address then error(name .. ': ' .. reason, 0) end
+  return address
+end
+
 function M.resolve(readWorld, sections, packager)
-  -- Custom Skirmish Trails replaces the instruction after the call with a jump, so its opcode is any byte.
-  local site = core.AOBScan('6A 02 B9 ? ? ? ? E8 ? ? ? ? 68 ? ? ? ? B9 ? ? ? ? C7 05 ? ? ? ? ? ? ? ? E8 ? ? ? ? ? ? ? ? ? 89 2D ? ? ? ? 89 1D')
+  -- Custom Skirmish Trails can replace the instruction after the call.
+  local site = unique('6A 02 B9 ? ? ? ? E8 ? ? ? ? 68 ? ? ? ? B9 ? ? ? ? C7 05 ? ? ? ? ? ? ? ? E8 ? ? ? ? ? ? ? ? ? 89 2D ? ? ? ? 89 1D',
+    'native Load call')
   local call = site + 32
   assert(core.readInteger(site + 13) == sections and core.readInteger(site + 18) == packager
     and core.readInteger(site + 24) == packager + 0x20
     and call + 5 + core.readInteger(call + 1) == readWorld,
-    'Map Extensions: unexpected native Load call')
-  local cleanup = core.AOBScan('5F 5E B9 ? ? ? ? E8 ? ? ? ? 5D 8B 8C 24 F4 03 00 00 5B 33 CC E8 ? ? ? ? 81 C4 F4 03 00 00 C3',
-    call + 5, call + 0x300)
-  -- Earlier in the same Load case the game reads its game mode and takes the
-  -- single-player path for 0 (solitary) and 99 (skirmish); ebx is zero there.
+    'unexpected native Load call')
+  local cleanup = unique('5F 5E B9 ? ? ? ? E8 ? ? ? ? 5D 8B 8C 24 F4 03 00 00 5B 33 CC E8 ? ? ? ? 81 C4 F4 03 00 00 C3',
+    'native Load epilogue')
+  assert(cleanup >= call + 5 and cleanup <= call + 0x300, 'unexpected native Load epilogue')
   -- Multiplayer loads run inside a synchrony command and must not be refused.
-  local mode = core.AOBScan('A1 ? ? ? ? 3B C3 0F 84 ? ? ? ? 83 F8 63 0F 84', call - 0x300, call)
-  assert(mode + 13 + core.readInteger(mode + 9) == mode + 22 + core.readInteger(mode + 18),
-    'Map Extensions: unexpected native Load game mode branch')
+  local mode = unique('A1 ? ? ? ? 3B C3 0F 84 ? ? ? ? 83 F8 63 0F 84 ? ? ? ? 33 C0 39 1D ? ? ? ? 8D 68 01 74 37', 'native Load game mode')
+  assert(mode >= call - 0x300 and mode < call
+    and mode + 13 + core.readInteger(mode + 9) == mode + 22 + core.readInteger(mode + 18),
+    'unexpected native Load game mode branch')
   return call, cleanup, core.readInteger(mode + 1)
 end
 
@@ -32,14 +39,15 @@ end
 function M.install(call, cleanup, readWorld)
   local status = core.allocate(4, true)
   core.writeInteger(status, 0)
-  core.insertCode(call, 5, {
-    0xC7, 0x05, utils.itob(status), 1, 0, 0, 0, -- native Load is in progress
-    core.callTo(readWorld),
-    0x83, 0x3D, utils.itob(status), 2, -- cmp [status], 2
-    0xC7, 0x05, utils.itob(status), 0, 0, 0, 0, -- clear without modifying flags
-    0x75, 0x05, -- accepted: skip the jump to the native epilogue
-    core.jmpTo(cleanup),
-  })
+  local load = core.allocateAssembly([[
+    mov dword [status], 1
+    call readWorld
+    cmp dword [status], 2
+    mov dword [status], 0
+    je near cleanup
+    jmp resume
+  ]], {status = status, readWorld = readWorld, cleanup = cleanup, resume = call + 5})
+  core.writeCode(call, {core.jmpTo(load)})
   return status
 end
 
