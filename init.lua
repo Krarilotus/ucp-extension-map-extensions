@@ -17,18 +17,15 @@ local api = {}
 api = {
 
   enable = function(self, config)
-    local resolved, problem = pcall(game.resolve)
+    local resolved, problem = pcall(function()
+      game.resolve()
+      memory.initialize()
+      game.registerReadWriteSavHooks(memory.customMapSectionInfoArray, constants.CUSTOM_SECTION_ID, callbacks,
+        constants.MAP_MEMORY_SIZE)
+    end)
     if not resolved then
-      log(WARNING, 'Map Extensions: saving and loading extension data is off: ' .. tostring(problem))
-      return
+      log(ERROR, 'Map Extensions: saving and loading extension data is off: ' .. tostring(problem))
     end
-
-    game.enlargeMemoryAllocation(constants.MAP_MEMORY_SIZE)
-
-    memory.initialize()
-
-    game.registerReadWriteSavHooks(memory.customMapSectionInfoArray, constants.CUSTOM_SECTION_ID, callbacks)
-
   end,
 
   disable = function(self, config)
@@ -58,6 +55,7 @@ function api:requiredStateMapPolicyVersion() return 1 end
 ---readContext, and for Recorder the section table, the file packager and the two wrapped
 ---save functions (call those, never the unwrapped originals).
 function api:getNativeSaveInterface() return game.getNativeSaveInterface() end
+function api:hasNativeSaveInterface() return game.hasNativeSaveInterface() end
 
 ---The ZIP for section 1337, without a native save or a write to game memory.
 function api:captureSaveSection() return callbacks.captureSections() end

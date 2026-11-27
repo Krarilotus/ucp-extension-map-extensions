@@ -18,11 +18,17 @@ local function expect(address, pattern, what)
   end
 end
 
+local function unique(pattern, name)
+  local address, reason = core.AOBScanUnique(pattern)
+  if not address then error(name .. ': ' .. reason, 0) end
+  return address
+end
+
 -- Raises if a site is missing; nothing has been written to the game at that point.
 local function resolve()
   originalMapSectionInfoArray = core.AOBScan("? ? ? ? 00 00 00 00 20 74 02 00 01 00 e9 03 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 09 04 ? ? ? ? 00 00 00 00 20 74 02 00 01 00 ea 03 ? ? ? ? 00 00 00 00 40 e8 04 00 01 00 eb 03")
-  readWorld = core.AOBScan("83 EC 0C 53 56 8B F1 8B 46 20")
-  writeWorld = core.AOBScan("83 EC 10 53 55 56 8B F1 8B 46 20")
+  readWorld = unique("83 EC 0C 53 56 8B F1 8B 46 20", "native world reader")
+  writeWorld = unique("83 EC 10 53 55 56 8B F1 8B 46 20", "native world writer")
 
   -- Both functions start by allocating their file buffer: push <size>; ...
   ptr_codeReadSavMallocSize = readWorld + 0x0C
@@ -30,10 +36,10 @@ local function resolve()
   expect(ptr_codeReadSavMallocSize, "68 ? ? ? ? 89 44 24 14", "read buffer size")
   expect(ptr_codeWriteSavMallocSize, "68 ? ? ? ? 89 44 24 1C", "write buffer size")
 
-  ptr_FilePackagerObj = core.readInteger(core.AOBScan("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14 ") + 1)
+  ptr_FilePackagerObj = core.readInteger(unique("B9 ? ? ? ? E8 ? ? ? ? B9 ? ? ? ? E8 ? ? ? ? 8B 44 24 14", "native file packager") + 1)
+  ptr_afterReadDirectory = unique("89 5E 24 89 54 24 20", "native post-directory hook")
   -- Which file is being read: modules start fresh on a .map and restore on a .sav.
   filenameBinding, readContext = require('mapextensions.readcontext').resolve(readWorld)
-  ptr_afterReadDirectory = core.AOBScan("89 5E 24 89 54 24 20")
 end
 
 local function enlargeMemoryAllocation(memorySize)
@@ -79,7 +85,7 @@ local function stopLoading(result)
   log(WARNING, 'Map Extensions: loading failed.\n' .. tostring(result))
   log(FATAL, 'Map Extensions: the game could not be loaded.\n' .. shortReason(result)
     .. '\nRestart the game. Details: ucp3-error-log.log.')
-  error(result, 0)
+  return 0
 end
 
 -- A save that fails before the game writes the file is simply not written: an existing
@@ -91,7 +97,7 @@ local function refuseSaving(result)
   return 0
 end
 
-local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks)
+local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectionID, callbacks, memorySize)
   assert(nativeSaveInterface == nil, 'Map Extensions save hooks are already installed')
 
   -- Hooks
@@ -101,17 +107,70 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
   -- loading keeps the fatal path.
   local status
   local probe, decompress, refusal, gameMode
-  local call, cleanup
+  local call, load
   local resolved, unsupported = pcall(function()
     refusal = require('mapextensions.loadrefusal')
+    local cleanup
     call, cleanup, gameMode = refusal.resolve(readWorld, originalMapSectionInfoArray, ptr_FilePackagerObj)
     probe = require('mapextensions.archiveprobe')
     decompress = probe.resolveDecoder()
-    status = refusal.install(call, cleanup, readWorld)
+    load, status = refusal.prepare(call, cleanup, readWorld)
   end)
   if not resolved then
+    status = nil
     log(ERROR, 'Map Extensions: refusing saves before loading is off: ' .. shortReason(unsupported))
   end
+
+  -- The site lies between the native "cmp [esi+0x28], ebx" and its "jle"; the callback runs
+  -- between pushfd and popfd so that the jump reads the game's compare.
+  local afterReadDirectory = utils.createLuaFunctionWrapper(function(registers)
+    local ok, reason = xpcall(function()
+
+    local directoryDataAddress = ptr_FilePackagerObj + 36
+
+    local uncompressedSizesArray = directoryDataAddress + 28
+
+    local sectionIDArray = directoryDataAddress + 28 + (4*150) + (4*150)
+
+    local sectionIDs = utils.unpack("<i", core.readString(sectionIDArray, 4*150))
+
+    local i = -1
+    for index, sid in ipairs(sectionIDs) do
+      if sid == customSectionID then
+        i = index - 1 -- lua is 1 based
+        break
+      end
+    end
+
+    if i == -1 then
+
+      log(3, "afterReadDirectoryOfSav({size = 0})")
+      callbacks.afterReadDirectoryOfSav({
+        size = 0,
+      })
+
+      return
+    end
+
+    local customSectionSizeOfSav = core.readInteger(uncompressedSizesArray + (4 * i))
+
+    log(3, "afterReadDirectoryOfSav({size = ...})")
+    callbacks.afterReadDirectoryOfSav({
+      size = customSectionSizeOfSav,
+    })
+
+    end, debug.traceback)
+    if not ok then stopLoading(reason) end
+    return registers
+  end)
+  local directoryHook = core.allocateAssembly([[
+    pushfd
+    call afterReadDirectory
+    popfd
+    mov [esi + 0x24], ebx
+    mov [esp + 0x20], edx
+    jmp resume
+  ]], {afterReadDirectory = afterReadDirectory, resume = ptr_afterReadDirectory + 7})
 
   local originalReadSav
   originalReadSav = core.hookCode(function(this, ptrMapSectionAddressArray)
@@ -120,8 +179,9 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
     local started
     -- Only the single-player Load action can return to the menu before the world
     -- is read. Every other reader caller, multiplayer included, keeps the fatal path.
-    local early = status ~= nil and core.readInteger(status) == 1 and refusal.singlePlayer(gameMode)
+    local early
     local ok, reason = xpcall(function()
+      early = status ~= nil and core.readInteger(status) == 1 and refusal.singlePlayer(gameMode)
       if originalMapSectionInfoArray ~= ptrMapSectionAddressArray then error("argument is not what we expected") end
       local context, path = readContext()
       if early then
@@ -170,7 +230,7 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
         if not shown then log(ERROR, tostring(messageError)) end
         return 0
       end
-      stopLoading(name and ('This save needs the module ' .. name) or reason)
+      return stopLoading(name and ('This save needs the module ' .. name) or reason)
     end
     return result
 
@@ -198,57 +258,16 @@ local function registerReadWriteSavHooks(customMapSectionInfoArray, customSectio
 
   end, writeWorld, 2, CallingConvention.THISCALL, 5)
 
-  -- -- on clear map sections before read map or sav
-  -- core.detourCode(function(registers)
+  core.writeCode(ptr_afterReadDirectory, {core.jmpTo(directoryHook), 0x90, 0x90})
+  enlargeMemoryAllocation(memorySize)
 
-  --   return registers
-  -- end, core.AOBScan("53 55 56 8B F1 57 33 FF 89 ? ? ? ? ? 89 ? ? ? ? ? 89 ? ? ? ? ? 89 ? ? ? ? ? E8 ? ? ? ?"), 5)
-
-
-  -- The site lies between the native "cmp [esi+0x28], ebx" and its "jle"; the callback runs
-  -- between pushfd and popfd so that the jump reads the game's compare.
-  local afterReadDirectory = utils.createLuaFunctionWrapper(function(registers)
-    local ok, reason = xpcall(function()
-
-    local directoryDataAddress = ptr_FilePackagerObj + 36
-
-    local uncompressedSizesArray = directoryDataAddress + 28
-
-    local sectionIDArray = directoryDataAddress + 28 + (4*150) + (4*150)
-
-    local sectionIDs = utils.unpack("<i", core.readString(sectionIDArray, 4*150))
-
-    local i = -1
-    for index, sid in ipairs(sectionIDs) do
-      if sid == customSectionID then
-        i = index - 1 -- lua is 1 based
-        break
-      end
+  if status then
+    local installed, problem = pcall(core.writeCode, call, {core.jmpTo(load)})
+    if not installed then
+      status = nil
+      log(ERROR, 'Map Extensions: refusing saves before loading is off: ' .. shortReason(problem))
     end
-
-    if i == -1 then
-
-      log(3, "afterReadDirectoryOfSav({size = 0})")
-      callbacks.afterReadDirectoryOfSav({
-        size = 0,
-      })
-
-      return
-    end
-
-    local customSectionSizeOfSav = core.readInteger(uncompressedSizesArray + (4 * i))
-
-    log(3, "afterReadDirectoryOfSav({size = ...})")
-    callbacks.afterReadDirectoryOfSav({
-      size = customSectionSizeOfSav,
-    })
-
-    end, debug.traceback)
-    if not ok then stopLoading(reason) end
-    return registers
-  end)
-  core.insertCode(ptr_afterReadDirectory, 7,
-    { 0x9C, core.callTo(afterReadDirectory), 0x9D }, nil, "after")
+  end
 
   nativeSaveInterface = {
     version = 1,
@@ -284,10 +303,10 @@ end
 
 return {
   resolve = resolve,
-  enlargeMemoryAllocation = enlargeMemoryAllocation,
   createCustomSectionInfoArray = createCustomSectionInfoArray,
   updateCustomSectionInfoObject = updateCustomSectionInfoObject,
   registerReadWriteSavHooks = registerReadWriteSavHooks,
   getNativeSaveInterface = getNativeSaveInterface,
+  hasNativeSaveInterface = function() return nativeSaveInterface ~= nil end,
   takeLoadRefusal = takeLoadRefusal,
 }

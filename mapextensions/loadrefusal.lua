@@ -36,9 +36,8 @@ function M.singlePlayer(gameMode)
   return mode == 0 or mode == 99
 end
 
-function M.install(call, cleanup, readWorld)
+function M.prepare(call, cleanup, readWorld)
   local status = core.allocate(4, true)
-  core.writeInteger(status, 0)
   local load = core.allocateAssembly([[
     mov dword [status], 1
     call readWorld
@@ -47,8 +46,8 @@ function M.install(call, cleanup, readWorld)
     je near cleanup
     jmp resume
   ]], {status = status, readWorld = readWorld, cleanup = cleanup, resume = call + 5})
-  core.writeCode(call, {core.jmpTo(load)})
-  return status
+  core.writeInteger(status, 0)
+  return load, status
 end
 
 return M
