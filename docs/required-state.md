@@ -1,9 +1,11 @@
 # Required simulation state
 
 Map Extensions 1.1.0 lets a module mark its part of a save as required.
-AIC Tactics saves active AI recruitment rules and state. Improved Tunnelers
-saves active tunnel state. Recorder reads the required sections when it records
-a game. Existing two-argument
+Earlier AIC Tactics versions used this fingerprint-based contract to save active
+AI recruitment rules and state. Current AIC Tactics uses the format-based
+registration contract introduced in Map Extensions 1.2.1, which omits the
+fingerprint. Improved Tunnelers saves active tunnel state. Recorder reads the
+required sections when it records a game. Existing two-argument
 `registerSection(name, callbacks)` calls, such as UCP2-Legacy's AI state section,
 keep working. To mark a section as required, pass a third argument:
 
