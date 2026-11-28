@@ -19,8 +19,8 @@ local function expect(address, pattern, what)
 end
 
 local function unique(pattern, name)
-  local address, reason = core.AOBScanUnique(pattern)
-  if not address then error(name .. ': ' .. reason, 0) end
+  local ok, address = pcall(core.AOBScan, pattern)
+  if not ok then error(name .. ': not found', 0) end
   return address
 end
 
